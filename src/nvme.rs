@@ -105,7 +105,6 @@ impl NvmeQueuePair {
         // TODO: contruct PRP list?
         for chunk in data.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
-
             let addr = chunk.phys_addr as u64;
             let bytes = blocks * 512;
             let ptr1 = if bytes <= 4096 {
