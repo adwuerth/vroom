@@ -260,7 +260,7 @@ impl NvmeDevice {
             stats: NvmeStats::default(),
             q_id: 1,
         };
-        println!("dev has been set");
+        // println!("dev has been set");
 
         for i in 1..512 {
             dev.prp_list[i - 1] = (dev.buffer.phys + i * 4096) as u64;
@@ -270,7 +270,7 @@ impl NvmeDevice {
         println!("VS: 0x{:x}", dev.get_reg32(NvmeRegs32::VS as u32));
         println!("CC: 0x{:x}", dev.get_reg32(NvmeRegs32::CC as u32));
 
-        println!("Disabling controller");
+        // println!("Disabling controller");
         // Set Enable bit to 0
         let ctrl_config = dev.get_reg32(NvmeRegs32::CC as u32) & 0xFFFF_FFFE;
         dev.set_reg32(NvmeRegs32::CC as u32, ctrl_config);
@@ -308,7 +308,7 @@ impl NvmeDevice {
         dev.set_reg32(NvmeRegs32::CC as u32, cc);
 
         // Enable the controller
-        println!("Enabling controller");
+        // println!("Enabling controller");
         let ctrl_config = dev.get_reg32(NvmeRegs32::CC as u32) | 1;
         dev.set_reg32(NvmeRegs32::CC as u32, ctrl_config);
 
@@ -734,16 +734,12 @@ impl NvmeDevice {
         &mut self,
         cmd_init: F,
     ) -> Result<NvmeCompletion, Box<dyn Error>> {
-        println!("entering submit and complete admin");
         let cid = self.admin_sq.tail;
         let tail = self.admin_sq.submit(cmd_init(cid as u16, self.buffer.phys));
         self.write_reg_idx(NvmeArrayRegs::SQyTDBL, 0, tail as u32);
-        println!("halfway");
         let (head, entry, _) = self.admin_cq.complete_spin();
-        println!("spin complete");
         self.write_reg_idx(NvmeArrayRegs::CQyHDBL, 0, head as u32);
         let status = entry.status >> 1;
-        println!("before end");
         if status != 0 {
             eprintln!(
                 "Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",

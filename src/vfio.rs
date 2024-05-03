@@ -10,8 +10,6 @@ use std::ptr;
 
 // use crate::memory::{IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS};
 
-use libc::CLD_CONTINUED;
-
 use crate::memory::{
     get_vfio_container, set_vfio_container, IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS,
 };
@@ -142,7 +140,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
     let mut first_time_setup = false;
 
     let cfd = if let Some(cfd) = get_vfio_container() {
-        println!("take existing cfd: {cfd}");
+        // println!("take existing cfd: {cfd}");
         cfd
     } else {
         first_time_setup = true;
@@ -154,7 +152,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         let cfd = container_file.into_raw_fd();
         set_vfio_container(cfd);
 
-        println!("take new cfd: {cfd}");
+        // println!("take new cfd: {cfd}");
         // check if the container's API version is the same as the VFIO API's
         if unsafe { libc::ioctl(cfd, VFIO_GET_API_VERSION) } != VFIO_API_VERSION {
             return Err("unknown VFIO API Version".into());
@@ -168,7 +166,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         cfd
     };
 
-    println!("container file descriptor -> {}", cfd);
+    // println!("container file descriptor -> {}", cfd);
 
     // find vfio group for device
     let link = fs::read_link(format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).unwrap();
@@ -180,13 +178,13 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         .parse::<i32>()
         .unwrap();
 
-    println!("group: {group}");
+    // println!("group: {group}");
     let mut vfio_gfds = VFIO_GROUP_FILE_DESCRIPTORS.lock().unwrap();
-    println!("locked vfio_gfds");
+    // println!("locked vfio_gfds");
 
     #[allow(clippy::map_entry)]
     if !vfio_gfds.contains_key(&group) {
-        println!("contains key!");
+        // println!("contains key!");
 
         // open the devices' group
         group_file = OpenOptions::new()
@@ -196,7 +194,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         // group file descriptor
         gfd = group_file.into_raw_fd();
 
-        println!("gfd: {gfd}");
+        // println!("gfd: {gfd}");
 
         // Test the group is viable and available
         if unsafe { libc::ioctl(gfd, VFIO_GROUP_GET_STATUS, &mut group_status) } == -1 {
@@ -226,7 +224,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         gfd = *vfio_gfds.get(&group).unwrap();
     }
 
-    println!("libc::ioctl( {cfd}, {VFIO_SET_IOMMU}, {VFIO_TYPE1_IOMMU})");
+    // println!("libc::ioctl( {cfd}, {VFIO_SET_IOMMU}, {VFIO_TYPE1_IOMMU})");
 
     // println!("iommu info {:?}", unsafe {
     //     libc::ioctl(cfd, iommu_info);
@@ -243,7 +241,7 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         }
     }
 
-    println!("libc::ioctl({gfd},{VFIO_GROUP_GET_DEVICE_FD}, {pci_addr})");
+    // println!("libc::ioctl({gfd},{VFIO_GROUP_GET_DEVICE_FD}, {pci_addr})");
     // Get a file descriptor for the device
     dfd = unsafe { libc::ioctl(gfd, VFIO_GROUP_GET_DEVICE_FD, pci_addr) };
     if dfd == -1 {
@@ -254,9 +252,9 @@ pub fn vfio_init(pci_addr: &str) -> Result<RawFd, Box<dyn Error>> {
         .into());
     }
 
-    println!("enabling dma");
+    // println!("enabling dma");
     vfio_enable_dma(dfd)?;
-    println!("done with enabling dma");
+    // println!("done with enabling dma");
     Ok(dfd)
 }
 
