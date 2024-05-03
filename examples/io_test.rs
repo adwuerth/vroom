@@ -28,8 +28,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let mut nvme = vroom::init(&pci_addr)?;
 
-    let nvme = qd_n(nvme, 1, 0, false,  128, duration)?;
-    let _ = qd_n(nvme, 1, 0, false,  256, duration)?;
+    let nvme = qd_n(nvme, 1, 0, false, 128, duration)?;
+    let _ = qd_n(nvme, 1, 0, false, 256, duration)?;
 
     // let _ = qd1(nvme, 0, false, true, duration)?;
 
@@ -67,7 +67,11 @@ fn qd1(
         let mut ios = 0;
         let lba = 0;
         while total < time {
-            let lba = if random { rng.gen_range(0..ns_blocks) } else { (lba + 1) % ns_blocks };
+            let lba = if random {
+                rng.gen_range(0..ns_blocks)
+            } else {
+                (lba + 1) % ns_blocks
+            };
 
             let before = Instant::now();
             if write {
@@ -203,22 +207,16 @@ fn qd_n(
                 nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
                 (n, n as f64 / total.as_secs_f64())
             }
-
         });
         threads.push(handle);
     }
 
-    let total = threads
-        .into_iter()
-        .fold((0, 0.), |acc, thread| {
-            let res = thread
-                .join()
-                .expect("The thread creation or execution failed!");
-            (
-                acc.0 + res.0,
-                acc.1 + res.1,
-            )
-        });
+    let total = threads.into_iter().fold((0, 0.), |acc, thread| {
+        let res = thread
+            .join()
+            .expect("The thread creation or execution failed!");
+        (acc.0 + res.0, acc.1 + res.1)
+    });
     println!(
         "n: {}, total {} iops: {:?}",
         total.0,

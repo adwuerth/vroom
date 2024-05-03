@@ -9,6 +9,7 @@ mod nvme;
 mod pci;
 #[allow(dead_code)]
 mod queues;
+pub mod vfio;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};
@@ -16,6 +17,9 @@ use pci::*;
 pub use queues::QUEUE_LENGTH;
 use std::error::Error;
 
+/**
+ * Initializes the driver
+ */
 pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
@@ -31,8 +35,11 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
         return Err(format!("device {} is not a block device", pci_addr).into());
     }
 
+    println!("before initialization!");
     let mut nvme = NvmeDevice::init(pci_addr)?;
+    println!("after NvmeDevice initialization!");
     nvme.identify_controller()?;
+    println!("identifying controller done!");
     let ns = nvme.identify_namespace_list(0);
     for n in ns {
         println!("ns_id: {n}");

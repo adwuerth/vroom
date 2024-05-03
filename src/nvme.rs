@@ -2,10 +2,13 @@ use crate::cmd::NvmeCommand;
 use crate::memory::{Dma, DmaSlice};
 use crate::pci::pci_map_resource;
 use crate::queues::*;
+use crate::vfio::*;
 use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
 use std::collections::HashMap;
 use std::error::Error;
 use std::hint::spin_loop;
+use std::os::unix::io::RawFd;
+use std::path::Path;
 
 // clippy doesnt like this
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -217,7 +220,24 @@ unsafe impl Sync for NvmeDevice {}
 #[allow(unused)]
 impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let (addr, len) = pci_map_resource(pci_addr)?;
+        let vfio = Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists();
+
+        let device_fd: RawFd;
+        let (addr, len) = if vfio {
+            device_fd = vfio_init(pci_addr)?;
+            vfio_map_region(device_fd, VFIO_PCI_BAR0_REGION_INDEX)?
+        } else {
+            if unsafe { libc::getuid() } != 0 {
+                println!("not running as root, this will probably fail");
+            }
+
+            device_fd = -1;
+            pci_map_resource(pci_addr)?
+        };
+
+        // println!("entering NvmeDevice init");
+        // let (addr, len) = pci_map_resource(pci_addr)?;
+        // println!("resource mapped");
         let mut dev = Self {
             pci_addr: pci_addr.to_string(),
             addr,
@@ -240,6 +260,7 @@ impl NvmeDevice {
             stats: NvmeStats::default(),
             q_id: 1,
         };
+        println!("dev has been set");
 
         for i in 1..512 {
             dev.prp_list[i - 1] = (dev.buffer.phys + i * 4096) as u64;
@@ -713,13 +734,16 @@ impl NvmeDevice {
         &mut self,
         cmd_init: F,
     ) -> Result<NvmeCompletion, Box<dyn Error>> {
+        println!("entering submit and complete admin");
         let cid = self.admin_sq.tail;
         let tail = self.admin_sq.submit(cmd_init(cid as u16, self.buffer.phys));
         self.write_reg_idx(NvmeArrayRegs::SQyTDBL, 0, tail as u32);
-
+        println!("halfway");
         let (head, entry, _) = self.admin_cq.complete_spin();
+        println!("spin complete");
         self.write_reg_idx(NvmeArrayRegs::CQyHDBL, 0, head as u32);
         let status = entry.status >> 1;
+        println!("before end");
         if status != 0 {
             eprintln!(
                 "Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",

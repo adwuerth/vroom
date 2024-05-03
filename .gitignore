@@ -8,6 +8,9 @@ Cargo.lock
 .idea/
 *.iml
 
+# VSCode
+.vscode/
+
 # misc
 .DS_Store
 # Shakespeare
