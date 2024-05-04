@@ -220,12 +220,13 @@ unsafe impl Sync for NvmeDevice {}
 #[allow(unused)]
 impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let vfio = Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists();
+        let vfio_enabled =
+            Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists();
 
         let device_fd: RawFd;
-        let (addr, len) = if vfio {
-            device_fd = vfio_init(pci_addr)?;
-            vfio_map_region(device_fd, VFIO_PCI_BAR0_REGION_INDEX)?
+        let (addr, len) = if vfio_enabled {
+            let vfio = Vfio::init(pci_addr)?;
+            vfio.map_region(VFIO_PCI_BAR0_REGION_INDEX)?
         } else {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");

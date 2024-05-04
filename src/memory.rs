@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use std::slice;
 // use std::rc::Rc;
 // use std::cell::RefCell;
-use crate::vfio;
+use crate::vfio::*;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, Read, Seek};
@@ -23,6 +23,7 @@ pub const IOVA_WIDTH: u8 = 39;
 static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static mut VFIO_CONTAINER_FILE_DESCRIPTOR: Option<RawFd> = None;
+pub(crate) static mut VFIO: Option<Vfio> = None;
 
 lazy_static! {
     pub(crate) static ref VFIO_GROUP_FILE_DESCRIPTORS: Mutex<HashMap<i32, RawFd>> =
@@ -250,7 +251,7 @@ impl<T> Dma<T> {
                 )
                 .into())
             } else {
-                let iova = vfio::vfio_map_dma(ptr as usize, size)?;
+                let iova = Vfio::map_dma(ptr as usize, size)?;
 
                 let memory = Dma {
                     virt: ptr as *mut T,
