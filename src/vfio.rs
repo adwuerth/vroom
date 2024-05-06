@@ -145,7 +145,6 @@ pub struct Vfio {
 impl Vfio {
     /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let device_fd: RawFd;
         let group_file: File;
         let group_fd: RawFd;
 
@@ -254,12 +253,6 @@ impl Vfio {
             group_fd = *vfio_gfds.get(&group).unwrap();
         }
 
-        // println!("libc::ioctl( {cfd}, {VFIO_SET_IOMMU}, {VFIO_TYPE1_IOMMU})");
-
-        // println!("iommu info {:?}", unsafe {
-        //     libc::ioctl(cfd, iommu_info);
-        // });
-
         if first_time_setup {
             //    Enable the IOMMU model we want
             if unsafe { libc::ioctl(container_fd, VFIO_SET_IOMMU, VFIO_TYPE1_IOMMU) } == -1 {
@@ -271,9 +264,8 @@ impl Vfio {
             }
         }
 
-        // println!("libc::ioctl({gfd},{VFIO_GROUP_GET_DEVICE_FD}, {pci_addr})");
         // Get a file descriptor for the device
-        device_fd = unsafe { libc::ioctl(group_fd, VFIO_GROUP_GET_DEVICE_FD, pci_addr) };
+        let device_fd: RawFd = unsafe { libc::ioctl(group_fd, VFIO_GROUP_GET_DEVICE_FD, pci_addr) };
         if device_fd == -1 {
             return Err(format!(
                 "failed to VFIO_GROUP_GET_DEVICE_FD. Errno: {}",
@@ -288,14 +280,12 @@ impl Vfio {
             container_fd,
         };
 
-        // println!("enabling dma");
         vfio.enable_dma()?;
-        // println!("done with enabling dma");
         Ok(vfio)
     }
 
     /// Enables DMA Bit for VFIO devices
-    pub fn enable_dma(&self) -> Result<(), Box<dyn Error>> {
+    fn enable_dma(&self) -> Result<(), Box<dyn Error>> {
         // Get region info for config region
         let mut conf_reg: vfio_region_info = vfio_region_info {
             argsz: mem::size_of::<vfio_region_info>() as u32,

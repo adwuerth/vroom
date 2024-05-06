@@ -17,11 +17,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let nvme = vroom::init(&pci_addr)?;
-    println!("test");
-    let mut nvme = qd32_test(nvme, true)?;
-    let mut nvme = qd32_test(nvme, false)?;
-    let mut nvme = qd32(nvme)?;
+    let mut nvme = vroom::init(&pci_addr)?;
+    println!("init done");
+    // println!("test");
+    // let mut nvme = qd32_test(nvme, true)?;
+    // let mut nvme = qd32_test(nvme, false)?;
+    // let mut nvme = qd32(nvme)?;
 
     // TODO: make time based?
     // rnadom read/write qd1
@@ -30,8 +31,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks - blocks - 1;
 
     let mut buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE)?;
+    println!("allocate done");
 
-    let n = 1_000_000;
+    let n = 100_000;
     let mut read = std::time::Duration::new(0, 0);
     let mut write = std::time::Duration::new(0, 0);
 

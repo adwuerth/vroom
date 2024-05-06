@@ -225,9 +225,11 @@ impl NvmeDevice {
 
         let device_fd: RawFd;
         let (addr, len) = if vfio_enabled {
+            println!("initializing with vfio");
             let vfio = Vfio::init(pci_addr)?;
             vfio.map_region(VFIO_PCI_BAR0_REGION_INDEX)?
         } else {
+            println!("initializing without vfio");
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
@@ -271,7 +273,6 @@ impl NvmeDevice {
         println!("VS: 0x{:x}", dev.get_reg32(NvmeRegs32::VS as u32));
         println!("CC: 0x{:x}", dev.get_reg32(NvmeRegs32::CC as u32));
 
-        // println!("Disabling controller");
         // Set Enable bit to 0
         let ctrl_config = dev.get_reg32(NvmeRegs32::CC as u32) & 0xFFFF_FFFE;
         dev.set_reg32(NvmeRegs32::CC as u32, ctrl_config);

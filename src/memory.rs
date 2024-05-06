@@ -179,10 +179,10 @@ impl<T> Dma<T> {
         };
 
         if get_vfio_container().is_some() {
-            println!("allocating dma memory via VFIO");
+            // println!("allocating dma memory via VFIO");
 
             let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
-                println!("IOVA_WIDTH < X86_VA_WIDTH");
+                // println!("IOVA_WIDTH < X86_VA_WIDTH");
                 // To support IOMMUs capable of 39 bit wide IOVAs only, we use
                 // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
                 // using libc::MAP_HUGETLB, we create a 32 bit address with the
