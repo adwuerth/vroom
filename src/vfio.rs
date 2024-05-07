@@ -168,7 +168,6 @@ impl Vfio {
         let mut first_time_setup = false;
 
         let container_fd = if let Some(container_fd) = get_vfio_container() {
-            // println!("take existing cfd: {cfd}");
             container_fd
         } else {
             first_time_setup = true;
@@ -180,7 +179,6 @@ impl Vfio {
             let container_fd = container_file.into_raw_fd();
             set_vfio_container(container_fd);
 
-            // println!("take new cfd: {cfd}");
             // check if the container's API version is the same as the VFIO API's
             if unsafe { libc::ioctl(container_fd, VFIO_GET_API_VERSION) } != VFIO_API_VERSION {
                 return Err("unknown VFIO API Version".into());
@@ -194,8 +192,6 @@ impl Vfio {
             container_fd
         };
 
-        // println!("container file descriptor -> {}", cfd);
-
         // find vfio group for device
         let link = fs::read_link(format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).unwrap();
         let group = link
@@ -206,14 +202,10 @@ impl Vfio {
             .parse::<i32>()
             .unwrap();
 
-        // println!("group: {group}");
         let mut vfio_gfds = VFIO_GROUP_FILE_DESCRIPTORS.lock().unwrap();
-        // println!("locked vfio_gfds");
 
         #[allow(clippy::map_entry)]
         if !vfio_gfds.contains_key(&group) {
-            // println!("contains key!");
-
             // open the devices' group
             group_file = OpenOptions::new()
                 .read(true)
@@ -221,8 +213,6 @@ impl Vfio {
                 .open(format!("/dev/vfio/{}", group))?;
             // group file descriptor
             group_fd = group_file.into_raw_fd();
-
-            // println!("gfd: {gfd}");
 
             // Test the group is viable and available
             if unsafe { libc::ioctl(group_fd, VFIO_GROUP_GET_STATUS, &mut group_status) } == -1 {

@@ -33,7 +33,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE)?;
     println!("allocate done");
 
-    let n = 100_000;
+    let n = 10_000;
     let mut read = std::time::Duration::new(0, 0);
     let mut write = std::time::Duration::new(0, 0);
 
@@ -41,7 +41,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let seq = &(0..n)
         .map(|_| rng.gen_range(0..ns_blocks as u64))
         .collect::<Vec<u64>>()[..];
+    let mut ctr = 0;
     for &lba in seq {
+        if ctr % (n / 10) == 0 {
+            println!("passed iteration {ctr}");
+        }
+        ctr += 1;
         let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
 
         buffer[..rand_block.len()].copy_from_slice(rand_block);
