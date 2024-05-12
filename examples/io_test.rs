@@ -28,11 +28,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let mut nvme = vroom::init(&pci_addr)?;
 
-    let nvme = qd_n(nvme, 1, 0, false, 128, duration)?;
-    let _ = qd_n(nvme, 1, 0, false, 256, duration)?;
+    //let nvme = qd_n(nvme, 1, 0, false, 128, duration)?;
+    // let _ = qd_n(nvme, 1, 0, false, 256, duration)?;
 
-    // let _ = qd1(nvme, 0, false, true, duration)?;
-
+    let nvme = qd1(nvme, 0, true, true, duration)?;
+    let _ = qd1(nvme, 0, false, true, duration)?;
     Ok(())
 }
 
@@ -107,6 +107,7 @@ fn qd1(
     Ok(nvme)
 }
 
+// queue depth n
 #[allow(unused)]
 fn qd_n(
     nvme: NvmeDevice,

@@ -33,7 +33,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE)?;
     println!("allocate done");
 
-    let n = 10_000;
+    let n = 100_000;
     let mut read = std::time::Duration::new(0, 0);
     let mut write = std::time::Duration::new(0, 0);
 
@@ -62,7 +62,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         nvme.read(&buffer.slice(0..bytes as usize), lba)?;
         read += before.elapsed();
 
-        // assert_eq!(&buffer[0..rand_block.len()], rand_block);
+        assert_eq!(&buffer[0..rand_block.len()], rand_block);
         // lba += blocks as u64;
     }
     println!("total completions: {}", nvme.stats.completions);
