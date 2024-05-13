@@ -3,7 +3,7 @@ name=nvme-seq-read
 time_based
 ramp_time=5
 runtime=30
-readwrite=read
+readwrite=write
 bs=256k
 direct=1
 numjobs=1
