@@ -1,0 +1,9 @@
+time_based
+ramp_time=5
+runtime=30
+bs=256k
+direct=1
+numjobs=1
+iodepth=32
+group_reporting=1
+filename=/dev/nvme0n1

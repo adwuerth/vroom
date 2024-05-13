@@ -1,0 +1,10 @@
+[global]
+io_engine={spdk,io_uring,libaio,psync}
+rw={randread,randwrite,read,write}
+blocksize=4k
+direct=1
+norandommap=1
+runtime=900
+numjobs={1,4}
+queue_depth={1,32}
+group_reporting=1

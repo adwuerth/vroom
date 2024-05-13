@@ -1,0 +1,14 @@
+[global]
+ioengine=spdk
+rw=read
+blocksize=4k
+direct=1
+norandommap=1
+runtime=900
+numjobs=1
+iodepth=1
+group_reporting=1
+thread=1
+filename=trtype=PCIe traddr=0000.00.01.0 ns=1
+
+[spdk]
