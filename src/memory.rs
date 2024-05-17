@@ -18,11 +18,13 @@ const X86_VA_WIDTH: u8 = 47;
 const HUGE_PAGE_BITS: u32 = 21;
 pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
 
+// todo iova width?=
 // pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
 pub const IOVA_WIDTH: u8 = 39;
 
 static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
+// todo remove this ?
 pub(crate) static mut VFIO_CONTAINER_FILE_DESCRIPTOR: Option<RawFd> = None;
 // pub(crate) static mut VFIO: Option<Vfio> = None;
 
@@ -182,15 +184,12 @@ impl<T> Dma<T> {
         if get_vfio_container().is_some() {
             Self::allocate_vfio(size)
         } else {
-            Self::allocate_direct(size)
+            Self::allocate_uio(size)
         }
     }
 
     fn allocate_vfio(size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        // println!("allocating dma memory via VFIO");
-
         let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
-            // println!("IOVA_WIDTH < X86_VA_WIDTH");
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
             // using libc::MAP_HUGETLB, we create a 32 bit address with the
@@ -237,7 +236,6 @@ impl<T> Dma<T> {
                 )
             }
         } else {
-            println!("IOVA_WIDTH >= X86_VA_WIDTH");
             unsafe {
                 libc::mmap(
                     ptr::null_mut(),
@@ -270,7 +268,7 @@ impl<T> Dma<T> {
         }
     }
 
-    fn allocate_direct(size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+    fn allocate_uio(size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
 

@@ -51,7 +51,6 @@ pub(crate) enum NvmeArrayRegs {
     CQyHDBL,
 }
 
-// who tf is abbreviating this stuff
 #[repr(packed)]
 #[derive(Debug, Clone, Copy)]
 #[allow(unused)]

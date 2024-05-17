@@ -27,13 +27,45 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut nvme = vroom::init(&pci_addr)?;
+    let batch_size = 128;
 
-    //let nvme = qd_n(nvme, 1, 0, false, 128, duration)?;
-    // let _ = qd_n(nvme, 1, 0, false, 256, duration)?;
+    let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
 
-    let nvme = qd1(nvme, 0, true, true, duration)?;
-    let _ = qd1(nvme, 0, false, true, duration)?;
+    let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
+
+    let nvme = qd_wrapper(nvme, 1, 1, batch_size, true, duration)?;
+
+    let nvme = qd_wrapper(nvme, 32, 4, batch_size, true, duration)?;
+
+    let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
+
+    let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
+
+    let nvme = qd_wrapper(nvme, 128, 16, batch_size, true, duration)?;
+
+    let nvme = qd_wrapper(nvme, 128, 16, batch_size, false, duration)?;
+    // let nvme = qd_n(nvme, 1, 0, false, 256, duration)?;
+
+    // let nvme = qd1(nvme, 0, true, true, duration)?;
+    // let nvme = qd1(nvme, 0, false, true, duration)?;
     Ok(())
+}
+
+fn qd_wrapper(
+    nvme: NvmeDevice,
+    qd: u64,
+    threads: u64,
+    batch_size: usize,
+    write: bool,
+    duration: Option<Duration>,
+) -> Result<NvmeDevice, Box<dyn Error>> {
+    println!(
+        "QD{qd} {} with {threads} and batch size {batch_size} => STARTING",
+        if write { "write" } else { "read" }
+    );
+    let nvme = qd_n(nvme, threads, qd, write, batch_size, duration)?;
+    println!("QD{qd} with {threads} => ENDING\n");
+    Ok(nvme)
 }
 
 fn qd1(
@@ -115,8 +147,9 @@ fn qd_n(
     n: u64,
     write: bool,
     batch_size: usize,
-    time: Option<Duration>,
+    duration: Option<Duration>,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
+    // 8 * 512 => 4096 => 4k
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
 
@@ -145,7 +178,7 @@ fn qd_n(
             buffer[0..32 * bytes].copy_from_slice(rand_block);
 
             let mut ctr = 0;
-            if let Some(time) = time {
+            if let Some(time) = duration {
                 let mut ios = 0;
                 while total < time {
                     let lba = rng.gen_range(range.0..range.1);
@@ -187,6 +220,7 @@ fn qd_n(
                     while let Some(_) = qpair.quick_poll() {
                         ctr -= 1;
                     }
+                    //why 32
                     if ctr == 32 {
                         qpair.complete_io(1);
                         ctr -= 1;
@@ -235,6 +269,7 @@ fn qd_n(
 }
 
 fn fill_ns(nvme: &mut NvmeDevice) {
+    println!("filling namespace");
     let buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE).unwrap();
     let max_lba = nvme.namespaces.get(&1).unwrap().blocks - buffer.size as u64 / 512 - 1;
     let blocks = buffer.size as u64 / 512;

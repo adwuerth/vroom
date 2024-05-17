@@ -52,18 +52,21 @@ pub fn disable_interrupts(pci_addr: &str) -> Result<(), Box<dyn Error>> {
 }
 
 /// Mmaps a pci resource and returns a pointer to the mapped memory.
+/// UIO mapping
 pub fn pci_map_resource(pci_addr: &str) -> Result<(*mut u8, usize), Box<dyn Error>> {
     let path = format!("/sys/bus/pci/devices/{}/resource0", pci_addr);
-    println!("unbinding driver");
+
     unbind_driver(pci_addr)?;
-    println!("enabling dma");
+
     enable_dma(pci_addr)?;
-    println!("disableing interrupts");
+
     disable_interrupts(pci_addr)?;
-    println!("interrupts disabled");
+
     let file = fs::OpenOptions::new().read(true).write(true).open(&path)?;
     let len = fs::metadata(&path)?.len() as usize;
-    println!("doing mmap");
+
+    /// mmap with null ptr to address => kernel chooses address to create mapping
+    // creates uio mapping of resource0 of the NVMe Device
     let ptr = unsafe {
         libc::mmap(
             ptr::null_mut(),
@@ -74,7 +77,7 @@ pub fn pci_map_resource(pci_addr: &str) -> Result<(*mut u8, usize), Box<dyn Erro
             0,
         ) as *mut u8
     };
-    println!("mmap done");
+
     if ptr.is_null() || len == 0 {
         Err("pci mapping failed".into())
     } else {
