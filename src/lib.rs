@@ -10,6 +10,7 @@ mod pci;
 #[allow(dead_code)]
 mod queues;
 pub mod vfio;
+mod vfio_constants;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};

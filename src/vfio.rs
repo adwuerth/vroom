@@ -8,45 +8,14 @@ use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
 
-// use crate::memory::{IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS};
+use crate::vfio_constants::*;
 
 use crate::memory::{
     get_vfio_container, set_vfio_container, IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS,
 };
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
 
-// constants needed for IOMMU. Grabbed from linux/vfio.h
-pub const VFIO_GET_API_VERSION: u64 = 15204;
-pub const VFIO_CHECK_EXTENSION: u64 = 15205;
-pub const VFIO_SET_IOMMU: u64 = 15206;
-pub const VFIO_GROUP_GET_STATUS: u64 = 15207;
-pub const VFIO_GROUP_SET_CONTAINER: u64 = 15208;
-pub const VFIO_GROUP_GET_DEVICE_FD: u64 = 15210;
-pub const VFIO_DEVICE_GET_REGION_INFO: u64 = 15212;
 
-pub const VFIO_API_VERSION: i32 = 0;
-pub const VFIO_TYPE1_IOMMU: u64 = 1;
-pub const VFIO_GROUP_FLAGS_VIABLE: u32 = 1;
-pub const VFIO_PCI_CONFIG_REGION_INDEX: u32 = 7;
-pub const VFIO_PCI_BAR0_REGION_INDEX: u32 = 0;
-
-const VFIO_DMA_MAP_FLAG_READ: u32 = 1;
-const VFIO_DMA_MAP_FLAG_WRITE: u32 = 2;
-const VFIO_IOMMU_MAP_DMA: u64 = 15217;
-
-// constants needed for IOMMU Interrupts. Grabbed from linux/vfio.h
-pub const VFIO_DEVICE_GET_IRQ_INFO: u64 = 15213;
-pub const VFIO_DEVICE_SET_IRQS: u64 = 15214;
-pub const VFIO_IRQ_SET_DATA_NONE: u32 = 1; /* Data not present */
-pub const VFIO_IRQ_SET_DATA_EVENTFD: u32 = 1 << 2; /* Data is eventfd (s32) */
-pub const VFIO_IRQ_SET_ACTION_TRIGGER: u32 = 1 << 5; /* Trigger interrupt */
-pub const VFIO_PCI_MSI_IRQ_INDEX: u64 = 1;
-pub const VFIO_PCI_MSIX_IRQ_INDEX: u64 = 2;
-pub const VFIO_IRQ_INFO_EVENTFD: u32 = 1;
-
-// constants to determine IOMMU (guest) address width
-const VTD_CAP_MGAW_SHIFT: u8 = 16;
-const VTD_CAP_MGAW_MASK: u64 = 0x3f << VTD_CAP_MGAW_SHIFT;
 
 /// struct vfio_iommu_type1_dma_map, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
@@ -114,28 +83,6 @@ pub struct Event {
     pub data: u64,
 }
 
-/// Checks if the IOMMU is from Intel.
-pub fn vfio_is_intel_iommu(pci_addr: &str) -> bool {
-    Path::new(&format!(
-        "/sys/bus/pci/devices/{}/iommu/intel-iommu",
-        pci_addr
-    ))
-    .exists()
-}
-
-/// Returns the IOMMU's guest address width.
-pub fn vfio_get_intel_iommu_gaw(pci_addr: &str) -> u8 {
-    let mut iommu_cap_file = pci_open_resource_ro(pci_addr, "iommu/intel-iommu/cap")
-        .expect("failed to read IOMMU capabilities");
-
-    let iommu_cap = read_hex(&mut iommu_cap_file)
-        .expect("failed to convert IOMMU capabilities hex string to u64");
-
-    let mgaw = ((iommu_cap & VTD_CAP_MGAW_MASK) >> VTD_CAP_MGAW_SHIFT) + 1;
-
-    mgaw as u8
-}
-
 pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
@@ -148,8 +95,8 @@ impl Vfio {
         let group_file: File;
         let group_fd: RawFd;
 
-        if vfio_is_intel_iommu(pci_addr) {
-            let mgaw = vfio_get_intel_iommu_gaw(pci_addr);
+        if Self::is_intel_iommu(pci_addr) {
+            let mgaw = Self::get_intel_iommu_gaw(pci_addr);
 
             if mgaw < IOVA_WIDTH {
                 println!("IOMMU supports only {} bit wide IOVAs, reduce IOVA_WIDTH in src/memory.rs if DMA mappings fail!", mgaw);
@@ -274,7 +221,7 @@ impl Vfio {
         Ok(vfio)
     }
 
-    /// Enables DMA Bit for VFIO devices
+    /// Enables DMA Bit for VFIO device
     fn enable_dma(&self) -> Result<(), Box<dyn Error>> {
         // Get region info for config region
         let mut conf_reg: vfio_region_info = vfio_region_info {
@@ -330,7 +277,7 @@ impl Vfio {
         Ok(())
     }
 
-    /// Mmaps a VFIO resource and returns a pointer to the mapped memory.
+    /// mmap a VFIO resource and returns a pointer to the mapped memory.
     pub fn map_region(&self, index: u32) -> Result<(*mut u8, usize), Box<dyn Error>> {
         let mut region_info: vfio_region_info = vfio_region_info {
             argsz: mem::size_of::<vfio_region_info>() as u32,
@@ -414,7 +361,7 @@ impl Vfio {
         .exists()
     }
 
-    /// Returns the IOMMU's guest address width.
+    /// Returns the IOMMU guest address width.
     pub fn get_intel_iommu_gaw(pci_addr: &str) -> u8 {
         let mut iommu_cap_file = pci_open_resource_ro(pci_addr, "iommu/intel-iommu/cap")
             .expect("failed to read IOMMU capabilities");

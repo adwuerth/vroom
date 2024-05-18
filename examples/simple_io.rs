@@ -4,6 +4,7 @@ use std::{env, process};
 use vroom::memory::{vfio_enabled, Dma};
 use vroom::vfio;
 use vroom::HUGE_PAGE_SIZE;
+use vroom::vfio::Vfio;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -21,8 +22,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let lba = 0;
 
     println!("vfio enabled? {:?}", vfio_enabled());
-    println!("is intel iommu? {:?}", vfio::vfio_is_intel_iommu(&pci_addr));
-    println!("gaw: {:?}", vfio::vfio_get_intel_iommu_gaw(&pci_addr));
+    println!("is intel iommu? {:?}", Vfio::is_intel_iommu(&pci_addr));
+    println!("gaw: {:?}", Vfio::get_intel_iommu_gaw(&pci_addr));
 
     // Initialize NVMe Driver
     let mut nvme = vroom::init(&pci_addr)?;
