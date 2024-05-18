@@ -11,6 +11,7 @@ mod pci;
 mod queues;
 pub mod vfio;
 mod vfio_constants;
+mod uio;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};

@@ -1,6 +1,5 @@
 use crate::cmd::NvmeCommand;
-use crate::memory::{Dma, DmaSlice};
-use crate::pci::pci_map_resource;
+use crate::memory::{Dma, DmaSlice, set_uio, set_vfio};
 use crate::queues::*;
 use crate::vfio::*;
 use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
@@ -9,6 +8,8 @@ use std::error::Error;
 use std::hint::spin_loop;
 use std::os::unix::io::RawFd;
 use std::path::Path;
+use crate::uio::Uio;
+use crate::vfio_constants::VFIO_PCI_BAR0_REGION_INDEX;
 
 // clippy doesnt like this
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -219,14 +220,13 @@ unsafe impl Sync for NvmeDevice {}
 #[allow(unused)]
 impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let vfio_enabled =
-            Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists();
-
         let device_fd: RawFd;
-        let (addr, len) = if vfio_enabled {
+        let (addr, len) = if Vfio::is_enabled(pci_addr) {
             println!("initializing with vfio");
             let vfio = Vfio::init(pci_addr)?;
+            set_vfio(vfio);
             vfio.map_region(VFIO_PCI_BAR0_REGION_INDEX)?
+
         } else {
             println!("initializing without vfio");
             if unsafe { libc::getuid() } != 0 {
@@ -234,7 +234,9 @@ impl NvmeDevice {
             }
 
             device_fd = -1;
-            pci_map_resource(pci_addr)?
+            let uio = Uio::init(pci_addr)?;
+            set_uio(uio);
+            uio.map_resource()?
         };
 
         // println!("entering NvmeDevice init");

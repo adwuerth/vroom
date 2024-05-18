@@ -7,12 +7,11 @@ use std::mem;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
+use crate::HUGE_PAGE_SIZE;
 
 use crate::vfio_constants::*;
 
-use crate::memory::{
-    get_vfio_container, set_vfio_container, IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS,
-};
+use crate::memory::{get_vfio, set_vfio, IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS, Dma};
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
 
 
@@ -114,8 +113,8 @@ impl Vfio {
         // need to set up the container exactly once
         let mut first_time_setup = false;
 
-        let container_fd = if let Some(container_fd) = get_vfio_container() {
-            container_fd
+        let container_fd = if let Some(vfio) = get_vfio() {
+            vfio.container_fd
         } else {
             first_time_setup = true;
             // open vfio file to create new vfio container
@@ -124,7 +123,7 @@ impl Vfio {
                 .write(true)
                 .open("/dev/vfio/vfio")?;
             let container_fd = container_file.into_raw_fd();
-            set_vfio_container(container_fd);
+            set_vfio(container_fd);
 
             // check if the container's API version is the same as the VFIO API's
             if unsafe { libc::ioctl(container_fd, VFIO_GET_API_VERSION) } != VFIO_API_VERSION {
@@ -218,7 +217,91 @@ impl Vfio {
         };
 
         vfio.enable_dma()?;
+
         Ok(vfio)
+    }
+
+    pub fn is_enabled(pci_addr: &str) -> bool {
+        Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists()
+    }
+    pub(crate) fn allocate<T>(size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        let ptr = if IOVA_WIDTH < crate::memory::X86_VA_WIDTH {
+            // To support IOMMUs capable of 39 bit wide IOVAs only, we use
+            // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
+            // using libc::MAP_HUGETLB, we create a 32 bit address with the
+            // right alignment (huge page size, e.g. 2 MB) on our own.
+
+            // first allocate memory of size (needed size + 1 huge page) to
+            // get a mapping containing the huge page size aligned address
+            let addr = unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size + HUGE_PAGE_SIZE,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
+                    -1,
+                    0,
+                )
+            };
+
+            // calculate the huge page size aligned address by rounding up
+            let aligned_addr = ((addr as isize + HUGE_PAGE_SIZE as isize - 1)
+                & -(HUGE_PAGE_SIZE as isize)) as *mut libc::c_void;
+
+            let free_chunk_size = aligned_addr as usize - addr as usize;
+
+            // free unneeded pages (i.e. all chunks of the additionally mapped huge page)
+            unsafe {
+                libc::munmap(addr, free_chunk_size);
+                libc::munmap(aligned_addr.add(size), HUGE_PAGE_SIZE - free_chunk_size);
+            }
+
+            // finally map huge pages at the huge page size aligned 32 bit address
+            unsafe {
+                libc::mmap(
+                    aligned_addr as *mut libc::c_void,
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED
+                        | libc::MAP_ANONYMOUS
+                        | libc::MAP_HUGETLB
+                        | crate::memory::MAP_HUGE_2MB
+                        | libc::MAP_FIXED,
+                    -1,
+                    0,
+                )
+            }
+        } else {
+            unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | crate::memory::MAP_HUGE_2MB,
+                    -1,
+                    0,
+                )
+            }
+        };
+
+        // This is the main IOMMU work: IOMMU DMA MAP the memory...
+        if ptr == libc::MAP_FAILED {
+            Err(format!(
+                "failed to memory map DMA-memory. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+                .into())
+        } else {
+            let iova = Vfio::map_dma(ptr as usize, size)?;
+
+            let memory = Dma {
+                virt: ptr as *mut T,
+                phys: iova,
+                size,
+            };
+
+            Ok(memory)
+        }
     }
 
     /// Enables DMA Bit for VFIO device
@@ -336,7 +419,7 @@ impl Vfio {
         };
         let ioctl_result = unsafe {
             libc::ioctl(
-                get_vfio_container().unwrap(),
+                get_vfio().unwrap(),
                 VFIO_IOMMU_MAP_DMA,
                 &mut iommu_dma_map,
             )
