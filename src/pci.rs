@@ -1,8 +1,6 @@
 use std::error::Error;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::unix::prelude::AsRawFd;
-use std::ptr;
 
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 

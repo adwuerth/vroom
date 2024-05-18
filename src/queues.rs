@@ -2,6 +2,7 @@ use crate::cmd::NvmeCommand;
 use crate::memory::*;
 use std::error::Error;
 use std::hint::spin_loop;
+use crate::ioallocator::{IOAllocator};
 
 /// NVMe spec 4.6
 /// Completion queue entry
@@ -37,9 +38,9 @@ pub struct NvmeSubQueue {
 }
 
 impl NvmeSubQueue {
-    pub fn new(len: usize, doorbell: usize) -> Result<Self, Box<dyn Error>> {
+    pub fn new(len: usize, doorbell: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
         Ok(Self {
-            commands: Dma::allocate(crate::memory::HUGE_PAGE_SIZE)?,
+            commands: Dma::allocate(crate::memory::HUGE_PAGE_SIZE, allocator)?,
             head: 0,
             tail: 0,
             len: len.min(QUEUE_LENGTH),
@@ -88,9 +89,9 @@ pub struct NvmeCompQueue {
 
 // TODO: error handling
 impl NvmeCompQueue {
-    pub fn new(len: usize, doorbell: usize) -> Result<Self, Box<dyn Error>> {
+    pub fn new(len: usize, doorbell: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
         Ok(Self {
-            commands: Dma::allocate(crate::memory::HUGE_PAGE_SIZE)?,
+            commands: Dma::allocate(crate::memory::HUGE_PAGE_SIZE, allocator)?,
             head: 0,
             phase: true,
             len: len.min(QUEUE_LENGTH),

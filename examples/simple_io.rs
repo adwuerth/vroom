@@ -1,8 +1,7 @@
 use std::error::Error;
 use std::str;
 use std::{env, process};
-use vroom::memory::{vfio_enabled, Dma};
-use vroom::vfio;
+use vroom::memory::{Dma};
 use vroom::HUGE_PAGE_SIZE;
 use vroom::vfio::Vfio;
 
@@ -21,7 +20,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // Logical Block Adress
     let lba = 0;
 
-    println!("vfio enabled? {:?}", vfio_enabled());
+    println!("vfio enabled? {:?}", Vfio::is_enabled(&pci_addr));
     println!("is intel iommu? {:?}", Vfio::is_intel_iommu(&pci_addr));
     println!("gaw: {:?}", Vfio::get_intel_iommu_gaw(&pci_addr));
 
@@ -30,7 +29,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
-    let mut buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE)?;
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
     buffer[..bytes.len()].copy_from_slice(bytes);
 
     // Write the bytes to the NVMe memory

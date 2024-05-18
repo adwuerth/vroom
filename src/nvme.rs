@@ -1,17 +1,16 @@
-use crate::cmd::NvmeCommand;
-use crate::memory::{Dma, DmaSlice, set_uio, set_vfio};
-use crate::queues::*;
-use crate::vfio::*;
-use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
 use std::collections::HashMap;
 use std::error::Error;
 use std::hint::spin_loop;
-use std::os::unix::io::RawFd;
-use std::path::Path;
-use crate::uio::Uio;
-use crate::vfio_constants::VFIO_PCI_BAR0_REGION_INDEX;
 
-// clippy doesnt like this
+use crate::{HUGE_PAGE_SIZE, NvmeNamespace, NvmeStats};
+use crate::cmd::NvmeCommand;
+use crate::ioallocator::{Allocating, IOAllocator};
+use crate::ioallocator::IOAllocator::{UioAllocator, VfioAllocator};
+use crate::memory::{Dma, DmaSlice};
+use crate::queues::*;
+use crate::uio::Uio;
+use crate::vfio::*;
+
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
 pub enum NvmeRegs32 {
@@ -211,37 +210,28 @@ pub struct NvmeDevice {
     pub namespaces: HashMap<u32, NvmeNamespace>,
     pub stats: NvmeStats,
     q_id: u16,
+    pub(crate) allocator: IOAllocator,
 }
 
 // TODO
 unsafe impl Send for NvmeDevice {}
+
 unsafe impl Sync for NvmeDevice {}
 
 #[allow(unused)]
 impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let device_fd: RawFd;
-        let (addr, len) = if Vfio::is_enabled(pci_addr) {
-            println!("initializing with vfio");
-            let vfio = Vfio::init(pci_addr)?;
-            set_vfio(vfio);
-            vfio.map_region(VFIO_PCI_BAR0_REGION_INDEX)?
-
+        let allocator: IOAllocator = if Vfio::is_enabled(pci_addr) {
+            VfioAllocator(Vfio::init(pci_addr)?)
         } else {
-            println!("initializing without vfio");
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-
-            device_fd = -1;
-            let uio = Uio::init(pci_addr)?;
-            set_uio(uio);
-            uio.map_resource()?
+            UioAllocator(Uio::init(pci_addr)?)
         };
 
-        // println!("entering NvmeDevice init");
-        // let (addr, len) = pci_map_resource(pci_addr)?;
-        // println!("resource mapped");
+        let (addr, len) = allocator.map_resource()?;
+
         let mut dev = Self {
             pci_addr: pci_addr.to_string(),
             addr,
@@ -254,15 +244,16 @@ impl NvmeDevice {
                 }
             },
             len,
-            admin_sq: NvmeSubQueue::new(QUEUE_LENGTH, 0)?,
-            admin_cq: NvmeCompQueue::new(QUEUE_LENGTH, 0)?,
-            io_sq: NvmeSubQueue::new(QUEUE_LENGTH, 0)?,
-            io_cq: NvmeCompQueue::new(QUEUE_LENGTH, 0)?,
-            buffer: Dma::allocate(crate::memory::HUGE_PAGE_SIZE)?,
-            prp_list: Dma::allocate(8 * 512)?,
+            admin_sq: NvmeSubQueue::new(QUEUE_LENGTH, 0, &allocator)?,
+            admin_cq: NvmeCompQueue::new(QUEUE_LENGTH, 0, &allocator)?,
+            io_sq: NvmeSubQueue::new(QUEUE_LENGTH, 0, &allocator)?,
+            io_cq: NvmeCompQueue::new(QUEUE_LENGTH, 0, &allocator)?,
+            buffer: Dma::allocate(crate::memory::HUGE_PAGE_SIZE, &allocator)?,
+            prp_list: Dma::allocate(8 * 512, &allocator)?,
             namespaces: HashMap::new(),
             stats: NvmeStats::default(),
             q_id: 1,
+            allocator,
         };
         // println!("dev has been set");
 
@@ -398,7 +389,7 @@ impl NvmeDevice {
 
         let dbl = self.addr as usize + offset;
 
-        let comp_queue = NvmeCompQueue::new(len, dbl)?;
+        let comp_queue = NvmeCompQueue::new(len, dbl, &self.allocator)?;
         let comp = self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::create_io_completion_queue(
                 c_id,
@@ -409,7 +400,7 @@ impl NvmeDevice {
         })?;
 
         let dbl = self.addr as usize + 0x1000 + ((4 << self.dstrd) * (2 * q_id) as usize);
-        let sub_queue = NvmeSubQueue::new(len, dbl)?;
+        let sub_queue = NvmeSubQueue::new(len, dbl, &self.allocator)?;
         let comp = self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::create_io_submission_queue(
                 c_id,
@@ -831,5 +822,15 @@ impl NvmeDevice {
         assert!(reg as usize <= self.len - 8, "memory access out of bounds");
 
         unsafe { std::ptr::read_volatile((self.addr as usize + reg as usize) as *mut u64) }
+    }
+}
+
+impl Allocating for NvmeDevice {
+    fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        self.allocator.allocate(size)
+    }
+
+    fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
+        self.allocator.map_resource()
     }
 }

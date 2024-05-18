@@ -20,7 +20,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut nvme = vroom::init(&pci_addr)?;
 
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
-    let mut buffer: Dma<u8> = Dma::allocate(HUGE_PAGE_SIZE)?;
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
     buffer[..bytes.len()].copy_from_slice(bytes);
 
     nvme.write(&buffer, lba)?;

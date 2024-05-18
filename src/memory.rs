@@ -1,18 +1,15 @@
-use lazy_static::lazy_static;
-
-use std::slice;
-// use std::rc::Rc;
-// use std::cell::RefCell;
-use crate::vfio::*;
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::{self, Read, Seek};
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
-use std::os::fd::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::os::fd::RawFd;
+use std::slice;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
-use std::{fs, mem, process, ptr};
-use crate::uio::Uio;
+
+use lazy_static::lazy_static;
+
+use crate::ioallocator::{Allocating, IOAllocator};
+use crate::NvmeDevice;
 
 // from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
 pub(crate) const X86_VA_WIDTH: u8 = 47;
@@ -26,8 +23,10 @@ pub const IOVA_WIDTH: u8 = 39;
 
 pub(crate) static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) static mut vfio: Option<Vfio> = None;
-pub(crate) static mut uio: Option<Uio> = None;
+lazy_static! {
+    pub(crate) static ref VFIO_GROUP_FILE_DESCRIPTORS: Mutex<HashMap<i32, RawFd>> =
+        Mutex::new(HashMap::new());
+}
 
 #[derive(Debug)]
 pub struct Dma<T> {
@@ -169,40 +168,18 @@ pub(crate) const MAP_HUGE_2MB: i32 = 0x5400_0000; // 21 << 26
 
 impl<T> Dma<T> {
     /// Allocates DMA Memory on a huge page
-    pub fn allocate(size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+    pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Dma<T>, Box<dyn Error>> {
         let size = if size % HUGE_PAGE_SIZE != 0 {
             ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
         } else {
             size
         };
 
-        if get_vfio().is_some() {
-            if get_uio().is_some() {
-                Err("It seems UIO and VFIO are initialized, this should not be possible".into())
-            } else {
-                Vfio::allocate::<T>(size)
-            }
-        } else if get_uio().is_some() {
-            Uio::allocate::<T>(size)
-        } else {
-            Err("UIO/VFIO is not initialized, call NvmeDevice init first!".into())
-        }
+        allocator.allocate::<T>(size)
+    }
 
+    pub fn allocate_nvme(size: usize, nvme: &NvmeDevice) -> Result<Dma<T>, Box<dyn Error>> {
+        Self::allocate(size, &nvme.allocator)
     }
 }
 
-pub fn get_vfio() -> &'static Option<Vfio> {
-    unsafe { &vfio }
-}
-
-pub fn set_vfio(new_vfio: Vfio) {
-    unsafe { vfio = Some(new_vfio) }
-}
-
-pub fn get_uio() -> &'static Option<Uio> {
-    unsafe { &uio }
-}
-
-pub fn set_uio(new_uio: Uio) {
-    unsafe { uio = Some(new_uio) }
-}
