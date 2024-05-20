@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::hint::spin_loop;
 
-use crate::{HUGE_PAGE_SIZE, NvmeNamespace, NvmeStats};
 use crate::cmd::NvmeCommand;
-use crate::ioallocator::{Allocating, IOAllocator};
 use crate::ioallocator::IOAllocator::{UioAllocator, VfioAllocator};
+use crate::ioallocator::{Allocating, IOAllocator};
 use crate::memory::{Dma, DmaSlice};
 use crate::queues::*;
 use crate::uio::Uio;
-use crate::vfio::*;
+use crate::vfio::Vfio;
+use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
 
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
@@ -161,7 +161,7 @@ impl NvmeQueuePair {
         let status = c_entry.status >> 1;
         if status != 0 {
             eprintln!(
-                "Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",
+                "COMPLETE_IO Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",
                 status,
                 status & 0xFF,
                 (status >> 8) & 0x7
@@ -181,7 +181,7 @@ impl NvmeQueuePair {
             let status = c_entry.status >> 1;
             if status != 0 {
                 eprintln!(
-                    "Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",
+                    "QUICK_POLL Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",
                     status,
                     status & 0xFF,
                     (status >> 8) & 0x7

@@ -1,11 +1,16 @@
+use crate::ioallocator::Allocating;
+use crate::memory::Dma;
+use crate::pci::{
+    read_io16, write_io16, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET, INTERRUPT_DISABLE,
+};
 use std::error::Error;
-use std::{fs, io, mem, process, ptr};
+use std::io::Write;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
-use std::sync::atomic::Ordering;
-use crate::ioallocator::Allocating;
-use crate::memory::{Dma};
-use crate::pci::{BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET, INTERRUPT_DISABLE, read_io16, write_io16};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fs, io, mem, process, ptr};
+
+pub(crate) static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
 pub struct Uio {
     pci_addr: String,
@@ -14,9 +19,7 @@ pub struct Uio {
 impl Uio {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let pci_addr = pci_addr.to_string();
-        Ok(Uio {
-            pci_addr
-        })
+        Ok(Uio { pci_addr })
     }
 
     /// Translates a virtual address to its physical counterpart
@@ -79,7 +82,7 @@ impl Uio {
 
 impl Allocating for Uio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let id = crate::memory::HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
+        let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
 
         match fs::OpenOptions::new()

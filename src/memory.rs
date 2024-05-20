@@ -1,32 +1,12 @@
-use std::collections::HashMap;
 use std::error::Error;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
-use std::os::fd::RawFd;
 use std::slice;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Mutex;
-
-use lazy_static::lazy_static;
 
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::NvmeDevice;
 
-// from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
-pub(crate) const X86_VA_WIDTH: u8 = 47;
-
 const HUGE_PAGE_BITS: u32 = 21;
 pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
-
-// todo iova width?
-// pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
-pub const IOVA_WIDTH: u8 = 39;
-
-pub(crate) static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
-
-lazy_static! {
-    pub(crate) static ref VFIO_GROUP_FILE_DESCRIPTORS: Mutex<HashMap<i32, RawFd>> =
-        Mutex::new(HashMap::new());
-}
 
 #[derive(Debug)]
 pub struct Dma<T> {
@@ -96,7 +76,7 @@ pub struct DmaChunk<'a, T> {
 }
 
 impl DmaSlice for Dma<u8> {
-    type Item = Dma<u8>;
+    type Item = Self;
     fn chunks(&self, bytes: usize) -> DmaChunks<u8> {
         DmaChunks {
             current_offset: 0,
@@ -109,7 +89,7 @@ impl DmaSlice for Dma<u8> {
         assert!(index.end <= self.size, "Index out of bounds");
 
         unsafe {
-            Dma {
+            Self {
                 virt: self.virt.add(index.start),
                 phys: self.phys + index.start,
                 size: (index.end - index.start),
@@ -182,4 +162,3 @@ impl<T> Dma<T> {
         Self::allocate(size, &nvme.allocator)
     }
 }
-

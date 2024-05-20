@@ -32,7 +32,7 @@ pub struct NvmeCommand {
 }
 
 impl NvmeCommand {
-    pub fn create_io_completion_queue(c_id: u16, qid: u16, ptr: usize, size: u16) -> Self {
+    pub const fn create_io_completion_queue(c_id: u16, qid: u16, ptr: usize, size: u16) -> Self {
         Self {
             opcode: 5,
             flags: 0,
@@ -50,7 +50,7 @@ impl NvmeCommand {
         }
     }
 
-    pub fn create_io_submission_queue(
+    pub const fn create_io_submission_queue(
         c_id: u16,
         q_id: u16,
         ptr: usize,
@@ -93,7 +93,7 @@ impl NvmeCommand {
         }
     }
 
-    pub fn identify_namespace(c_id: u16, ptr: usize, ns_id: u32) -> Self {
+    pub const fn identify_namespace(c_id: u16, ptr: usize, ns_id: u32) -> Self {
         Self {
             opcode: 6,
             flags: 0,
@@ -111,7 +111,7 @@ impl NvmeCommand {
         }
     }
 
-    pub fn identify_controller(c_id: u16, ptr: usize) -> Self {
+    pub const fn identify_controller(c_id: u16, ptr: usize) -> Self {
         Self {
             opcode: 6,
             flags: 0,
@@ -129,7 +129,7 @@ impl NvmeCommand {
         }
     }
 
-    pub fn identify_namespace_list(c_id: u16, ptr: usize, base: u32) -> Self {
+    pub const fn identify_namespace_list(c_id: u16, ptr: usize, base: u32) -> Self {
         Self {
             opcode: 6,
             flags: 0,
@@ -156,7 +156,14 @@ impl NvmeCommand {
         }
     }
 
-    pub fn io_read(c_id: u16, ns_id: u32, lba: u64, blocks_1: u16, ptr0: u64, ptr1: u64) -> Self {
+    pub const fn io_read(
+        c_id: u16,
+        ns_id: u32,
+        lba: u64,
+        blocks_1: u16,
+        ptr0: u64,
+        ptr1: u64,
+    ) -> Self {
         Self {
             opcode: 2,
             flags: 0,
@@ -174,7 +181,14 @@ impl NvmeCommand {
         }
     }
 
-    pub fn io_write(c_id: u16, ns_id: u32, lba: u64, blocks_1: u16, ptr0: u64, ptr1: u64) -> Self {
+    pub const fn io_write(
+        c_id: u16,
+        ns_id: u32,
+        lba: u64,
+        blocks_1: u16,
+        ptr0: u64,
+        ptr1: u64,
+    ) -> Self {
         Self {
             opcode: 1,
             flags: 0,
@@ -192,7 +206,7 @@ impl NvmeCommand {
         }
     }
 
-    pub(crate) fn format_nvm(c_id: u16, ns_id: u32) -> Self {
+    pub(crate) const fn format_nvm(c_id: u16, ns_id: u32) -> Self {
         Self {
             opcode: 0x80,
             flags: 0,
@@ -208,12 +222,10 @@ impl NvmeCommand {
             cdw13: 0,
             cdw14: 0,
             cdw15: 0,
-
         }
-
     }
 
-    pub(crate) fn async_event_req(c_id: u16) -> Self {
+    pub(crate) const fn async_event_req(c_id: u16) -> Self {
         Self {
             opcode: 0xC,
             flags: 0,
@@ -227,11 +239,18 @@ impl NvmeCommand {
             cdw12: 0,
             cdw13: 0,
             cdw14: 0,
-            cdw15: 0
+            cdw15: 0,
         }
     }
 
-    pub(crate) fn get_log_page(c_id: u16, numd: u32, ptr0: u64, ptr1: u64, lid: u8, lpid: u16) -> Self {
+    pub(crate) fn get_log_page(
+        c_id: u16,
+        numd: u32,
+        ptr0: u64,
+        ptr1: u64,
+        lid: u8,
+        lpid: u16,
+    ) -> Self {
         Self {
             c_id,
             d_ptr: [ptr0, ptr1],
@@ -242,7 +261,7 @@ impl NvmeCommand {
     }
 
     // not supported by samsung
-    pub fn write_zeroes(c_id: u16, ns_id: u32, slba: u64, nlb: u16, deac: bool) -> Self {
+    pub const fn write_zeroes(c_id: u16, ns_id: u32, slba: u64, nlb: u16, deac: bool) -> Self {
         Self {
             opcode: 8,
             flags: 0,
@@ -259,6 +278,5 @@ impl NvmeCommand {
             cdw14: 0,
             cdw15: 0,
         }
-
     }
 }

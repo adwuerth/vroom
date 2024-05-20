@@ -1,7 +1,6 @@
 const _IOC_TYPESHIFT: u64 = 8;
 const _IOC_NRSHIFT: u64 = 0;
 
-
 // _IO macro from ioctl.h, _IOC is inlined, as only _IO is needed
 #[allow(non_snake_case)]
 const fn _IO(type_: u64, nr: u64) -> u64 {
@@ -9,7 +8,7 @@ const fn _IO(type_: u64, nr: u64) -> u64 {
 }
 
 // constants needed for IOMMU. Grabbed from linux/vfio.h
-const VFIO_TYPE: u64 = ';' as u8 as u64;
+const VFIO_TYPE: u64 = b';' as u64;
 const VFIO_BASE: u64 = 100;
 
 pub const VFIO_GET_API_VERSION: u64 = _IO(VFIO_TYPE, VFIO_BASE + 0);
@@ -23,7 +22,6 @@ pub const VFIO_DEVICE_GET_REGION_INFO: u64 = _IO(VFIO_TYPE, VFIO_BASE + 8);
 pub const VFIO_API_VERSION: i32 = 0;
 pub const VFIO_TYPE1_IOMMU: u64 = 1;
 pub const VFIO_GROUP_FLAGS_VIABLE: u32 = 1 << 0;
-
 
 pub const VFIO_DMA_MAP_FLAG_READ: u32 = 1 << 0;
 pub const VFIO_DMA_MAP_FLAG_WRITE: u32 = 1 << 1;

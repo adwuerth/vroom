@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom};
 
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 

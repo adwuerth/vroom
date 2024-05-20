@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use crate::ioallocator::Allocating;
+use crate::HUGE_PAGE_SIZE;
 use std::error::Error;
 use std::fs;
 use std::fs::{File, OpenOptions};
@@ -7,14 +9,20 @@ use std::mem;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
-use crate::HUGE_PAGE_SIZE;
-use crate::ioallocator::Allocating;
 
+#[allow(clippy::wildcard_imports)]
 use crate::vfio_constants::*;
+use lazy_static::lazy_static;
 
-use crate::memory::{IOVA_WIDTH, VFIO_GROUP_FILE_DESCRIPTORS, Dma};
+use crate::memory::Dma;
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
+lazy_static! {
+    pub(crate) static ref VFIO_GROUP_FILE_DESCRIPTORS: Mutex<HashMap<i32, RawFd>> =
+        Mutex::new(HashMap::new());
+}
 
 /// struct vfio_iommu_type1_dma_map, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
@@ -90,11 +98,19 @@ pub struct Vfio {
     container_fd: RawFd,
 }
 
+// from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
+pub(crate) const X86_VA_WIDTH: u8 = 47;
+// todo iova width?
+//pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
+pub const IOVA_WIDTH: u8 = 47;
+
 impl Vfio {
     /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let group_file: File;
         let group_fd: RawFd;
+
+        println!("initializing vfio with IOVA WIDTH = {IOVA_WIDTH}");
 
         if Self::is_intel_iommu(pci_addr) {
             let mgaw = Self::get_intel_iommu_gaw(pci_addr);
@@ -111,7 +127,6 @@ impl Vfio {
             argsz: mem::size_of::<vfio_group_status>() as u32,
             flags: 0,
         };
-
 
         // open vfio file to create new vfio container
         let container_file = OpenOptions::new()
@@ -132,7 +147,7 @@ impl Vfio {
         }
 
         // find vfio group for device
-        let link = fs::read_link(format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).unwrap();
+        let link = fs::read_link(format!("/sys/bus/pci/devices/{pci_addr}/iommu_group")).unwrap();
         let group = link
             .file_name()
             .unwrap()
@@ -149,7 +164,7 @@ impl Vfio {
             group_file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(format!("/dev/vfio/{}", group))?;
+                .open(format!("/dev/vfio/{group}"))?;
             // group file descriptor
             group_fd = group_file.into_raw_fd();
 
@@ -159,7 +174,7 @@ impl Vfio {
                     "failed to VFIO_GROUP_GET_STATUS. Errno: {}",
                     std::io::Error::last_os_error()
                 )
-                    .into());
+                .into());
             }
             if (group_status.flags & VFIO_GROUP_FLAGS_VIABLE) != 1 {
                 return Err(
@@ -174,7 +189,7 @@ impl Vfio {
                     "failed to VFIO_GROUP_SET_CONTAINER. Errno: {}",
                     std::io::Error::last_os_error()
                 )
-                    .into());
+                .into());
             }
 
             vfio_gfds.insert(group, group_fd);
@@ -182,16 +197,14 @@ impl Vfio {
             group_fd = *vfio_gfds.get(&group).unwrap();
         }
 
-
         //    Enable the IOMMU model we want
         if unsafe { libc::ioctl(container_fd, VFIO_SET_IOMMU, VFIO_TYPE1_IOMMU) } == -1 {
             return Err(format!(
                 "failed to VFIO_SET_IOMMU to VFIO_TYPE1_IOMMU. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
-
 
         // Get a file descriptor for the device
         let device_fd: RawFd = unsafe { libc::ioctl(group_fd, VFIO_GROUP_GET_DEVICE_FD, pci_addr) };
@@ -200,7 +213,7 @@ impl Vfio {
                 "failed to VFIO_GROUP_GET_DEVICE_FD. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
 
         let vfio = Self {
@@ -215,7 +228,7 @@ impl Vfio {
     }
 
     pub fn is_enabled(pci_addr: &str) -> bool {
-        Path::new(&format!("/sys/bus/pci/devices/{}/iommu_group", pci_addr)).exists()
+        Path::new(&format!("/sys/bus/pci/devices/{pci_addr}/iommu_group")).exists()
     }
 
     /// Enables DMA Bit for VFIO device
@@ -251,7 +264,7 @@ impl Vfio {
                 "failed to pread DMA bit. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
 
         dma |= 1 << BUS_MASTER_ENABLE_BIT;
@@ -269,7 +282,7 @@ impl Vfio {
                 "failed to pwrite DMA bit. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
         Ok(())
     }
@@ -296,7 +309,7 @@ impl Vfio {
                 "failed to VFIO_DEVICE_GET_REGION_INFO. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
 
         let len = region_info.size as usize;
@@ -316,7 +329,7 @@ impl Vfio {
                 "failed to mmap region. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into());
+            .into());
         }
         let addr = ptr as *mut u8;
 
@@ -331,13 +344,8 @@ impl Vfio {
             iova: ptr as *mut u8,
             flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
         };
-        let ioctl_result = unsafe {
-            libc::ioctl(
-                self.container_fd,
-                VFIO_IOMMU_MAP_DMA,
-                &mut iommu_dma_map,
-            )
-        };
+        let ioctl_result =
+            unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
         if ioctl_result != -1 {
             Ok(iommu_dma_map.iova as usize)
         } else {
@@ -345,7 +353,7 @@ impl Vfio {
                 "failed to map the DMA memory (ulimit set?). Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into())
+            .into())
         }
     }
 
@@ -355,7 +363,7 @@ impl Vfio {
             "/sys/bus/pci/devices/{}/iommu/intel-iommu",
             pci_addr
         ))
-            .exists()
+        .exists()
     }
 
     /// Returns the IOMMU guest address width.
@@ -374,7 +382,7 @@ impl Vfio {
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let ptr = if IOVA_WIDTH < crate::memory::X86_VA_WIDTH {
+        let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
             // using libc::MAP_HUGETLB, we create a 32-bit address with the
@@ -426,7 +434,10 @@ impl Allocating for Vfio {
                     ptr::null_mut(),
                     size,
                     libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | crate::memory::MAP_HUGE_2MB,
+                    libc::MAP_SHARED
+                        | libc::MAP_ANONYMOUS
+                        | libc::MAP_HUGETLB
+                        | crate::memory::MAP_HUGE_2MB,
                     -1,
                     0,
                 )
@@ -439,7 +450,7 @@ impl Allocating for Vfio {
                 "failed to memory map DMA-memory. Errno: {}",
                 std::io::Error::last_os_error()
             )
-                .into())
+            .into())
         } else {
             let iova = self.map_dma(ptr as usize, size)?;
 
@@ -457,4 +468,3 @@ impl Allocating for Vfio {
         self.map_resource_index(VFIO_PCI_BAR0_REGION_INDEX)
     }
 }
-

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread};
 use vroom::memory::*;
+use vroom::vfio::Vfio;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 #[allow(unused_variables, unused_mut)]
@@ -27,28 +28,45 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut nvme = vroom::init(&pci_addr)?;
-    let batch_size = 128;
 
-    let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
+    let nvme = basic_test(nvme, duration);
 
-    let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
+    // let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
 
-    let nvme = qd_wrapper(nvme, 1, 1, batch_size, true, duration)?;
+    // let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
 
-    let nvme = qd_wrapper(nvme, 32, 4, batch_size, true, duration)?;
+    // let nvme = qd_wrapper(nvme, 1, 1, batch_size, true, duration)?;
 
-    let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
+    // let nvme = qd_wrapper(nvme, 32, 4, batch_size, true, duration)?;
 
-    let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
+    // let nvme = qd_wrapper(nvme, 1, 1, batch_size, false, duration)?;
 
-    let nvme = qd_wrapper(nvme, 128, 16, batch_size, true, duration)?;
+    // let nvme = qd_wrapper(nvme, 32, 4, batch_size, false, duration)?;
 
-    let nvme = qd_wrapper(nvme, 128, 16, batch_size, false, duration)?;
+    // let nvme = qd_wrapper(nvme, 128, 16, batch_size, true, duration)?;
+
+    // let nvme = qd_wrapper(nvme, 128, 16, batch_size, false, duration)?;
     // let nvme = qd_n(nvme, 1, 0, false, 256, duration)?;
 
     // let nvme = qd1(nvme, 0, true, true, duration)?;
     // let nvme = qd1(nvme, 0, false, true, duration)?;
     Ok(())
+}
+
+fn basic_test(nvme: NvmeDevice, duration: Option<Duration>) -> Result<NvmeDevice, Box<dyn Error>> {
+    let batch_size = 1;
+
+    let nvme = qd_wrapper(nvme, 0, 1, batch_size, false, duration)?;
+
+    let nvme = qd_wrapper(nvme, 0, 1, batch_size, true, duration)?;
+
+    let batch_size = 32;
+
+    let nvme = qd_wrapper(nvme, 0, 4, batch_size, false, duration)?;
+
+    let nvme = qd_wrapper(nvme, 0, 4, batch_size, true, duration)?;
+
+    Ok(nvme)
 }
 
 fn qd_wrapper(
@@ -60,11 +78,11 @@ fn qd_wrapper(
     duration: Option<Duration>,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
     println!(
-        "QD{qd} {} with {threads} and batch size {batch_size} => STARTING",
+        "QD{batch_size} {} with {threads} => STARTING",
         if write { "write" } else { "read" }
     );
     let nvme = qd_n(nvme, threads, qd, write, batch_size, duration)?;
-    println!("QD{qd} with {threads} => ENDING\n");
+    println!("QD{batch_size} with {threads} => ENDING\n");
     Ok(nvme)
 }
 
@@ -164,7 +182,8 @@ fn qd_n(
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
             let mut total = std::time::Duration::ZERO;
-            let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
+            let mut buffer: Dma<u8> =
+                Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -177,65 +196,65 @@ fn qd_n(
                 .collect::<Vec<_>>()[..];
             buffer[0..32 * bytes].copy_from_slice(rand_block);
 
-            let mut ctr = 0;
+            let mut outstanding_ops = 0;
             if let Some(time) = duration {
-                let mut ios = 0;
+                let mut total_io_ops = 0;
                 while total < time {
                     let lba = rng.gen_range(range.0..range.1);
                     let before = Instant::now();
-                    while let Some(_) = qpair.quick_poll() {
-                        ctr -= 1;
-                        ios += 1;
+                    while qpair.quick_poll().is_some() {
+                        outstanding_ops -= 1;
+                        total_io_ops += 1;
                     }
-                    if ctr == batch_size {
+                    if outstanding_ops == batch_size {
                         qpair.complete_io(1);
-                        ctr -= 1;
-                        ios += 1;
+                        outstanding_ops -= 1;
+                        total_io_ops += 1;
                     }
                     qpair.submit_io(
-                        &buffer.slice((ctr * bytes)..(ctr + 1) * bytes),
+                        &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                         lba * blocks,
                         write,
                     );
                     total += before.elapsed();
-                    ctr += 1;
+                    outstanding_ops += 1;
                 }
 
-                if ctr != 0 {
+                if outstanding_ops != 0 {
                     let before = Instant::now();
-                    qpair.complete_io(ctr);
+                    qpair.complete_io(outstanding_ops);
                     total += before.elapsed();
                 }
-                ios += ctr as u64;
+                total_io_ops += outstanding_ops as u64;
                 assert!(qpair.sub_queue.is_empty());
                 nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
 
-                (ios, ios as f64 / total.as_secs_f64())
+                (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
             } else {
                 let seq = &(0..n)
                     .map(|_| rng.gen_range(range.0..range.1))
                     .collect::<Vec<u64>>()[..];
                 for &lba in seq {
                     let before = Instant::now();
-                    while let Some(_) = qpair.quick_poll() {
-                        ctr -= 1;
+                    while qpair.quick_poll().is_some() {
+                        outstanding_ops -= 1;
                     }
-                    //why 32
-                    if ctr == 32 {
+                    //why 32 as fixed batch size?
+                    if outstanding_ops == 32 {
                         qpair.complete_io(1);
-                        ctr -= 1;
+                        outstanding_ops -= 1;
                     }
                     qpair.submit_io(
-                        &buffer.slice((ctr * bytes)..(ctr + 1) * bytes),
+                        &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                         lba * blocks,
                         write,
                     );
                     total += before.elapsed();
-                    ctr += 1;
+                    outstanding_ops += 1;
                 }
-                if ctr != 0 {
+                if outstanding_ops != 0 {
                     let before = Instant::now();
-                    qpair.complete_io(ctr);
+                    qpair.complete_io(outstanding_ops);
                     total += before.elapsed();
                 }
                 assert!(qpair.sub_queue.is_empty());

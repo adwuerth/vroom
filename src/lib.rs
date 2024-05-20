@@ -1,6 +1,14 @@
+// #![warn(
+//     clippy::all,
+//     //clippy::restriction,
+//     clippy::pedantic,
+//     clippy::nursery,
+//     clippy::cargo
+// )]
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_arm_hints))]
 #[allow(unused)]
 mod cmd;
+mod ioallocator;
 #[allow(dead_code)]
 pub mod memory;
 #[allow(dead_code)]
@@ -9,14 +17,15 @@ mod nvme;
 mod pci;
 #[allow(dead_code)]
 mod queues;
-pub mod vfio;
-mod vfio_constants;
 mod uio;
-mod ioallocator;
+pub mod vfio;
+
+#[allow(dead_code, clippy::identity_op)]
+mod vfio_constants;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};
-use pci::*;
+use pci::{pci_open_resource_ro, read_hex, read_io32};
 pub use queues::QUEUE_LENGTH;
 use std::error::Error;
 
