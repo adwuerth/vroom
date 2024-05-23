@@ -104,6 +104,7 @@ pub(crate) const X86_VA_WIDTH: u8 = 47;
 //pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
 pub const IOVA_WIDTH: u8 = 47;
 
+/// Implementation of Linux VFIO framework use virtual memory
 impl Vfio {
     /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
@@ -134,7 +135,6 @@ impl Vfio {
             .write(true)
             .open("/dev/vfio/vfio")?;
         let container_fd = container_file.into_raw_fd();
-        // set_vfio(container_fd);
 
         // check if the container's API version is the same as the VFIO API's
         if unsafe { libc::ioctl(container_fd, VFIO_GET_API_VERSION) } != VFIO_API_VERSION {
@@ -382,6 +382,7 @@ impl Vfio {
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        // todo test this
         let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when

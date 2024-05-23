@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -19,6 +19,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    #[allow(clippy::manual_map)]
     let duration = match args.next() {
         Some(secs) => Some(Duration::from_secs(secs.parse().expect(
             "Usage: cargo run --example init <pci bus id> <duration in seconds>",
@@ -30,44 +31,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let nvme = vroom::init(&pci_addr)?;
 
-    let nvme = basic_test(nvme, duration);
+    let random = true;
+
+    let nvme = test_throughput_random(nvme, 1, 1, duration, random, false)?;
+    // let nvme = test_throughput_random(nvme, 32, 4, duration, random, false)?;
 
     Ok(())
 }
 
-fn basic_test(nvme: NvmeDevice, duration: Duration) -> Result<NvmeDevice, Box<dyn Error>> {
-    let random = true;
-    let queue_depth = 1;
-    let thread_count = 1;
-
-    let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, false)?;
-
-    let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, true)?;
-
-    let queue_depth = 32;
-    let thread_count = 4;
-
-    let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, false)?;
-
-    let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, true)?;
-
-    // let queue_depth = 1;
-    // let thread_count = 4;
-
-    // let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, false)?;
-
-    // let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, true)?;
-
-    // let queue_depth = 32;
-    // let thread_count = 1;
-
-    // let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, false)?;
-
-    // let nvme = test_throughput(nvme, queue_depth, thread_count, duration, random, true)?;
-    Ok(nvme)
-}
-
-fn test_throughput(
+fn test_throughput_random(
     nvme: NvmeDevice,
     queue_depth: usize,
     thread_count: u64,
@@ -82,6 +54,29 @@ fn test_throughput(
         "Now testing QD{queue_depth} {} with {thread_count} threads.",
         if write { "write" } else { "read" }
     );
+
+    let nvme = if queue_depth == 1 && thread_count == 1 {
+        qd_1_singlethread(nvme, write, random, duration)?
+    } else {
+        qd_n_multithread(nvme, queue_depth, thread_count, duration, random, write)?
+    };
+
+    println!(
+        "Tested QD{queue_depth} {} with {thread_count} threads.",
+        if write { "write" } else { "read" }
+    );
+
+    Ok(nvme)
+}
+
+fn qd_n_multithread(
+    nvme: NvmeDevice,
+    queue_depth: usize,
+    thread_count: u64,
+    duration: Duration,
+    random: bool,
+    write: bool,
+) -> Result<NvmeDevice, Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
 
@@ -105,7 +100,7 @@ fn test_throughput(
                 .create_io_queue_pair(QUEUE_LENGTH)
                 .unwrap();
 
-            let bytes_mult = 32;
+            let bytes_mult = queue_depth;
             let rand_block = &(0..(bytes_mult * bytes))
                 .map(|_| rand::random::<u8>())
                 .collect::<Vec<_>>()[..];
@@ -156,10 +151,6 @@ fn test_throughput(
     });
 
     println!(
-        "Tested QD{queue_depth} {} with {thread_count} threads. Results:",
-        if write { "write" } else { "read" }
-    );
-    println!(
         "n: {}, total {} iops: {:?}",
         total.0,
         if write { "write" } else { "read" },
@@ -172,4 +163,50 @@ fn test_throughput(
         },
         Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
     }
+}
+
+fn qd_1_singlethread(
+    mut nvme: NvmeDevice,
+    write: bool,
+    random: bool,
+    duration: Duration,
+) -> Result<NvmeDevice, Box<dyn Error>> {
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
+
+    let blocks = 8;
+    let bytes = 512 * blocks;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1; // - blocks - 1;
+
+    let mut rng = thread_rng();
+
+    let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
+    buffer[..rand_block.len()].copy_from_slice(rand_block);
+
+    let mut total = Duration::ZERO;
+
+    let mut ios = 0;
+    let lba = 0;
+    while total < duration {
+        let lba = if random {
+            rng.gen_range(0..ns_blocks)
+        } else {
+            (lba + 1) % ns_blocks
+        };
+
+        let before = Instant::now();
+        if write {
+            nvme.write(&buffer.slice(0..bytes as usize), lba * blocks)?;
+        } else {
+            nvme.read(&buffer.slice(0..bytes as usize), lba * blocks)?;
+        }
+        let elapsed = before.elapsed();
+        total += elapsed;
+        ios += 1;
+    }
+    println!(
+        "IOP: {ios}, total {} iops: {:?}",
+        if write { "write" } else { "read" },
+        ios as f64 / total.as_secs_f64()
+    );
+    Ok(nvme)
 }
