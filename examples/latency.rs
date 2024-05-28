@@ -1,8 +1,8 @@
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, process, thread};
+use std::{env, process, thread, vec};
 use vroom::memory::*;
 
 use vroom::{NvmeDevice, QUEUE_LENGTH};
@@ -33,65 +33,61 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let random = true;
 
-    // fill_ns(&mut nvme);
+    let (nvme, mut latencies) = qd_1_singlethread_latency(nvme, true, true, duration)?;
 
-    let nvme = test_throughput_random(nvme, 256, 16, duration, random, false)?;
-
+    to_microseconds(&mut latencies);
+    let percentiles = calculate_percentiles(&mut latencies);
+    println!("{:?}", percentiles);
     Ok(())
 }
 
-fn test_throughput_random(
-    nvme: NvmeDevice,
-    queue_depth: usize,
-    thread_count: u64,
-    duration: Duration,
-    random: bool,
-    write: bool,
-) -> Result<NvmeDevice, Box<dyn Error>> {
-    println!();
-    println!("---------------------------------------------------------------");
-    println!();
-    println!(
-        "Now testing QD{queue_depth} {} with {thread_count} threads.",
-        if write { "write" } else { "read" }
-    );
-
-    let nvme = if queue_depth == 1 && thread_count == 1 {
-        qd_1_singlethread(nvme, write, random, duration)?
-    } else {
-        qd_n_multithread(nvme, queue_depth, thread_count, duration, random, write)?
-    };
-
-    println!(
-        "Tested QD{queue_depth} {} with {thread_count} threads.",
-        if write { "write" } else { "read" }
-    );
-
-    Ok(nvme)
+fn to_microseconds(latencies: &mut [f64]) {
+    for latency in latencies.iter_mut() {
+        *latency *= 1_000_000.0;
+    }
 }
 
-fn qd_n_multithread(
+fn calculate_percentiles(latencies: &mut [f64]) -> (f64, f64, Vec<f64>) {
+    latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let len = latencies.len();
+
+    let f = |p: f64| latencies[(len as f64 * p).ceil() as usize - 1];
+
+    let average: f64 = latencies.iter().sum::<f64>() / len as f64;
+
+    let max_latency: f64 = *latencies.last().unwrap();
+
+    (
+        average,
+        max_latency,
+        vec![f(0.90), f(0.99), f(0.999), f(0.9999), f(0.99999)],
+    )
+}
+
+fn qd_n_multithread_latency(
     nvme: NvmeDevice,
     queue_depth: usize,
     thread_count: u64,
     duration: Duration,
     random: bool,
     write: bool,
-) -> Result<NvmeDevice, Box<dyn Error>> {
+) -> Result<(NvmeDevice, Vec<f64>), Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
-
     let nvme = Arc::new(Mutex::new(nvme));
     let mut threads = Vec::new();
 
+    let latencies = Arc::new(Mutex::new(Vec::new()));
+
     for _ in 0..thread_count {
         let nvme = Arc::clone(&nvme);
+        let latencies = Arc::clone(&latencies);
         let range = (0, ns_blocks);
 
-        let handle = thread::spawn(move || -> (u64, f64) {
+        let handle = thread::spawn(move || {
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
-            let mut total = std::time::Duration::ZERO;
             let mut buffer: Dma<u8> =
                 Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
 
@@ -108,87 +104,95 @@ fn qd_n_multithread(
             buffer[0..bytes_mult * bytes].copy_from_slice(rand_block);
 
             let mut outstanding_ops = 0;
-            let mut total_io_ops = 0;
-            while total < duration {
+            let mut total = std::time::Duration::ZERO;
+            let start_time = Instant::now();
+
+            while start_time.elapsed() < duration {
                 let lba = rng.gen_range(range.0..range.1);
                 let before = Instant::now();
-                while qpair.quick_poll().is_some() {
-                    outstanding_ops -= 1;
-                    total_io_ops += 1;
-                }
-                if outstanding_ops == queue_depth {
-                    qpair.complete_io(1);
-                    outstanding_ops -= 1;
-                    total_io_ops += 1;
-                }
+
                 qpair.submit_io(
                     &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                     lba * blocks,
                     write,
                 );
-                total += before.elapsed();
+
+                while qpair.quick_poll().is_some() {
+                    outstanding_ops -= 1;
+                    let latency = before.elapsed().as_secs_f64();
+                    latencies.lock().unwrap().push(latency);
+                }
+
+                if outstanding_ops == queue_depth {
+                    qpair.complete_io(1);
+                    outstanding_ops -= 1;
+                    let latency = before.elapsed().as_secs_f64();
+                    latencies.lock().unwrap().push(latency);
+                }
+
                 outstanding_ops += 1;
+                if outstanding_ops > queue_depth {
+                    outstanding_ops = queue_depth;
+                }
             }
 
             if outstanding_ops != 0 {
                 let before = Instant::now();
                 qpair.complete_io(outstanding_ops);
-                total += before.elapsed();
+                let latency = before.elapsed().as_secs_f64();
+                latencies.lock().unwrap().push(latency);
             }
-            total_io_ops += outstanding_ops as u64;
+
             assert!(qpair.sub_queue.is_empty());
             nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
-
-            (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
         });
         threads.push(handle);
     }
 
-    let total = threads.into_iter().fold((0, 0.), |acc, thread| {
-        let res = thread
+    for handle in threads {
+        handle
             .join()
             .expect("The thread creation or execution failed!");
-        (acc.0 + res.0, acc.1 + res.1)
-    });
+    }
 
-    println!(
-        "n: {}, total {} iops: {:?}",
-        total.0,
-        if write { "write" } else { "read" },
-        total.1
-    );
+    let latencies = Arc::try_unwrap(latencies)
+        .expect("Arc::try_unwrap failed, not the last reference.")
+        .into_inner()
+        .expect("Mutex::into_inner failed.");
+
     match Arc::try_unwrap(nvme) {
         Ok(mutex) => match mutex.into_inner() {
-            Ok(t) => Ok(t),
+            Ok(t) => Ok((t, latencies)),
             Err(e) => Err(e.into()),
         },
         Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
     }
 }
 
-fn qd_1_singlethread(
+fn qd_1_singlethread_latency(
     mut nvme: NvmeDevice,
     write: bool,
     random: bool,
     duration: Duration,
-) -> Result<NvmeDevice, Box<dyn Error>> {
+) -> Result<(NvmeDevice, Vec<f64>), Box<dyn Error>> {
     let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;
-    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1; // - blocks - 1;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
 
-    let mut rng = thread_rng();
+    let mut rng = rand::thread_rng();
 
     let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
     buffer[..rand_block.len()].copy_from_slice(rand_block);
 
     let mut total = Duration::ZERO;
-
     let mut ios = 0;
-    let lba = 0;
+    let mut lba = 0;
+    let mut latencies = Vec::new();
+
     while total < duration {
-        let lba = if random {
+        lba = if random {
             rng.gen_range(0..ns_blocks)
         } else {
             (lba + 1) % ns_blocks
@@ -201,15 +205,18 @@ fn qd_1_singlethread(
             nvme.read(&buffer.slice(0..bytes as usize), lba * blocks)?;
         }
         let elapsed = before.elapsed();
+        latencies.push(elapsed.as_secs_f64());
         total += elapsed;
         ios += 1;
     }
+
     println!(
         "IOP: {ios}, total {} iops: {:?}",
         if write { "write" } else { "read" },
         ios as f64 / total.as_secs_f64()
     );
-    Ok(nvme)
+
+    Ok((nvme, latencies))
 }
 
 fn fill_ns(nvme: &mut NvmeDevice) {

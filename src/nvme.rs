@@ -3,12 +3,9 @@ use std::error::Error;
 use std::hint::spin_loop;
 
 use crate::cmd::NvmeCommand;
-use crate::ioallocator::IOAllocator::{UioAllocator, VfioAllocator};
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::memory::{Dma, DmaSlice};
 use crate::queues::*;
-use crate::uio::Uio;
-use crate::vfio::Vfio;
 use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
 
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -221,14 +218,7 @@ unsafe impl Sync for NvmeDevice {}
 #[allow(unused)]
 impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        let allocator: IOAllocator = if Vfio::is_enabled(pci_addr) {
-            VfioAllocator(Vfio::init(pci_addr)?)
-        } else {
-            if unsafe { libc::getuid() } != 0 {
-                println!("not running as root, this will probably fail");
-            }
-            UioAllocator(Uio::init(pci_addr)?)
-        };
+        let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
         let (addr, len) = allocator.map_resource()?;
 

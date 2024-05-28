@@ -35,7 +35,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 256, 16, duration, random, false)?;
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, false)?;
 
     Ok(())
 }
@@ -56,11 +56,16 @@ fn test_throughput_random(
         if write { "write" } else { "read" }
     );
 
-    let nvme = if queue_depth == 1 && thread_count == 1 {
-        qd_1_singlethread(nvme, write, random, duration)?
-    } else {
-        qd_n_multithread(nvme, queue_depth, thread_count, duration, random, write)?
-    };
+    // let nvme = if queue_depth == 1 && thread_count == 1 {
+    //     qd_1_singlethread(nvme, write, random, duration)?
+    // } else {
+    //     qd_n_multithread(nvme, queue_depth, thread_count, duration, random, write)?
+    // };
+
+    let (nvme, result_vec) =
+        qd_n_multithread(nvme, queue_depth, thread_count, duration, random, write)?;
+
+    println!("{:?}", result_vec);
 
     println!(
         "Tested QD{queue_depth} {} with {thread_count} threads.",
@@ -77,18 +82,23 @@ fn qd_n_multithread(
     duration: Duration,
     random: bool,
     write: bool,
-) -> Result<NvmeDevice, Box<dyn Error>> {
+) -> Result<(NvmeDevice, Vec<f64>), Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
-
     let nvme = Arc::new(Mutex::new(nvme));
     let mut threads = Vec::new();
 
+    let interval = Duration::from_secs(1);
+    let num_intervals = (duration.as_secs() + interval.as_secs() - 1) / interval.as_secs();
+
+    let throughput_data = Arc::new(Mutex::new(vec![0f64; num_intervals as usize]));
+
     for _ in 0..thread_count {
         let nvme = Arc::clone(&nvme);
+        let throughput_data = Arc::clone(&throughput_data);
         let range = (0, ns_blocks);
 
-        let handle = thread::spawn(move || -> (u64, f64) {
+        let handle = thread::spawn(move || {
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
             let mut total = std::time::Duration::ZERO;
@@ -109,25 +119,46 @@ fn qd_n_multithread(
 
             let mut outstanding_ops = 0;
             let mut total_io_ops = 0;
+            let mut interval_io_ops = 0;
+            let mut last_instant = Instant::now();
+            let start_instant = Instant::now();
+
             while total < duration {
                 let lba = rng.gen_range(range.0..range.1);
                 let before = Instant::now();
+
                 while qpair.quick_poll().is_some() {
                     outstanding_ops -= 1;
                     total_io_ops += 1;
+                    interval_io_ops += 1;
                 }
+
                 if outstanding_ops == queue_depth {
                     qpair.complete_io(1);
                     outstanding_ops -= 1;
                     total_io_ops += 1;
+                    interval_io_ops += 1;
                 }
+
                 qpair.submit_io(
                     &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                     lba * blocks,
                     write,
                 );
+
                 total += before.elapsed();
                 outstanding_ops += 1;
+
+                if last_instant.elapsed() >= interval {
+                    let elapsed_intervals =
+                        (start_instant.elapsed().as_secs() / interval.as_secs()) as usize;
+                    let mut data = throughput_data.lock().unwrap();
+                    if elapsed_intervals < data.len() {
+                        data[elapsed_intervals] += interval_io_ops as f64 / interval.as_secs_f64();
+                    }
+                    interval_io_ops = 0;
+                    last_instant = Instant::now();
+                }
             }
 
             if outstanding_ops != 0 {
@@ -136,30 +167,27 @@ fn qd_n_multithread(
                 total += before.elapsed();
             }
             total_io_ops += outstanding_ops as u64;
+
             assert!(qpair.sub_queue.is_empty());
             nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
-
-            (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
         });
         threads.push(handle);
     }
 
-    let total = threads.into_iter().fold((0, 0.), |acc, thread| {
-        let res = thread
+    for handle in threads {
+        handle
             .join()
             .expect("The thread creation or execution failed!");
-        (acc.0 + res.0, acc.1 + res.1)
-    });
+    }
 
-    println!(
-        "n: {}, total {} iops: {:?}",
-        total.0,
-        if write { "write" } else { "read" },
-        total.1
-    );
+    let throughput_data = Arc::try_unwrap(throughput_data)
+        .expect("Arc::try_unwrap failed, not the last reference.")
+        .into_inner()
+        .expect("Mutex::into_inner failed.");
+
     match Arc::try_unwrap(nvme) {
         Ok(mutex) => match mutex.into_inner() {
-            Ok(t) => Ok(t),
+            Ok(t) => Ok((t, throughput_data)),
             Err(e) => Err(e.into()),
         },
         Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),

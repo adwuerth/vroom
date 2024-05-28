@@ -101,8 +101,10 @@ pub struct Vfio {
 // from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
 pub(crate) const X86_VA_WIDTH: u8 = 47;
 // todo iova width?
-//pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
-pub const IOVA_WIDTH: u8 = 47;
+
+/// Usually 47 is supported, in VMs only 39
+// pub const IOVA_WIDTH: u8 = 39;
+pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
 
 /// Implementation of Linux VFIO framework use virtual memory
 impl Vfio {
