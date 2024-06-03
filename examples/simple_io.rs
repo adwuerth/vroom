@@ -1,9 +1,9 @@
 use std::error::Error;
 use std::str;
 use std::{env, process};
-use vroom::memory::{Dma};
-use vroom::HUGE_PAGE_SIZE;
+use vroom::memory::Dma;
 use vroom::vfio::Vfio;
+use vroom::HUGE_PAGE_SIZE;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();

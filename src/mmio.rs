@@ -12,14 +12,14 @@ use std::{fs, io, mem, process, ptr};
 
 pub(crate) static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
-pub struct Uio {
+pub struct Mmio {
     pci_addr: String,
 }
 
-impl Uio {
+impl Mmio {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let pci_addr = pci_addr.to_string();
-        Ok(Uio { pci_addr })
+        Ok(Mmio { pci_addr })
     }
 
     /// Translates a virtual address to its physical counterpart
@@ -80,7 +80,7 @@ impl Uio {
     }
 }
 
-impl Allocating for Uio {
+impl Allocating for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);

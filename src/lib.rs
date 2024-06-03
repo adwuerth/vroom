@@ -11,13 +11,13 @@ mod cmd;
 mod ioallocator;
 #[allow(dead_code)]
 pub mod memory;
+mod mmio;
 #[allow(dead_code)]
 mod nvme;
 #[allow(dead_code)]
 mod pci;
 #[allow(dead_code)]
 mod queues;
-mod uio;
 pub mod vfio;
 
 #[allow(dead_code, clippy::identity_op)]

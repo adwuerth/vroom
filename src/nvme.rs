@@ -48,7 +48,7 @@ pub(crate) enum NvmeArrayRegs {
     CQyHDBL,
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 #[allow(unused)]
 struct IdentifyNamespaceData {

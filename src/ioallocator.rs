@@ -1,5 +1,5 @@
 use crate::memory::Dma;
-use crate::uio::Uio;
+use crate::mmio::Mmio;
 use crate::vfio::Vfio;
 use std::error::Error;
 
@@ -13,7 +13,7 @@ pub trait Allocating {
 
 /// IOAllocators UIO and VFIO, is necessary such that trait Allocating can be used as a object
 pub enum IOAllocator {
-    UioAllocator(Uio),
+    MmioAllocator(Mmio),
     VfioAllocator(Vfio),
 }
 
@@ -26,7 +26,7 @@ impl IOAllocator {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-            Self::UioAllocator(Uio::init(pci_addr)?)
+            Self::MmioAllocator(Mmio::init(pci_addr)?)
         })
     }
 }
@@ -34,14 +34,14 @@ impl IOAllocator {
 impl Allocating for IOAllocator {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         match self {
-            Self::UioAllocator(uio) => uio.allocate(size),
+            Self::MmioAllocator(uio) => uio.allocate(size),
             Self::VfioAllocator(vfio) => vfio.allocate(size),
         }
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         match self {
-            Self::UioAllocator(uio) => uio.map_resource(),
+            Self::MmioAllocator(uio) => uio.map_resource(),
             Self::VfioAllocator(vfio) => vfio.map_resource(),
         }
     }

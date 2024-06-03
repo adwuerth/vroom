@@ -1,7 +1,7 @@
 /// NVMe Spec 4.2
 /// Submission queue entry
 #[derive(Clone, Copy, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct NvmeCommand {
     /// Opcode
     pub opcode: u8,
