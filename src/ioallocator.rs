@@ -21,8 +21,10 @@ impl IOAllocator {
     /// Returns either UIO or VFIO, depending on if vfio is enabled
     pub fn init(pci_addr: &str) -> Result<IOAllocator, Box<dyn Error>> {
         Ok(if Vfio::is_enabled(pci_addr) {
+            println!("initializing Vfio");
             Self::VfioAllocator(Vfio::init(pci_addr)?)
         } else {
+            println!("initializing Mmio");
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
@@ -34,14 +36,14 @@ impl IOAllocator {
 impl Allocating for IOAllocator {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         match self {
-            Self::MmioAllocator(uio) => uio.allocate(size),
+            Self::MmioAllocator(mmio) => mmio.allocate(size),
             Self::VfioAllocator(vfio) => vfio.allocate(size),
         }
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         match self {
-            Self::MmioAllocator(uio) => uio.map_resource(),
+            Self::MmioAllocator(mmio) => mmio.map_resource(),
             Self::VfioAllocator(vfio) => vfio.map_resource(),
         }
     }

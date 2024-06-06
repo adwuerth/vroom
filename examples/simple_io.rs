@@ -2,7 +2,6 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::Dma;
-use vroom::vfio::Vfio;
 use vroom::HUGE_PAGE_SIZE;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -19,10 +18,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // Logical Block Adress
     let lba = 0;
-
-    println!("vfio enabled? {:?}", Vfio::is_enabled(&pci_addr));
-    println!("is intel iommu? {:?}", Vfio::is_intel_iommu(&pci_addr));
-    println!("gaw: {:?}", Vfio::get_intel_iommu_gaw(&pci_addr));
 
     // Initialize NVMe Driver
     let mut nvme = vroom::init(&pci_addr)?;

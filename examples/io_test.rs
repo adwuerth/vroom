@@ -46,6 +46,7 @@ fn basic_test(nvme: NvmeDevice, duration: Option<Duration>) -> Result<NvmeDevice
 
     let nvme = qd_wrapper(nvme, 0, 4, queue_depth, true, duration)?;
 
+
     Ok(nvme)
 }
 
