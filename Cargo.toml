@@ -11,8 +11,8 @@ byteorder = "1"
 lazy_static = "1.4.0"
 rand = "0.8.5"
 
-# [build-dependencies]
-# bindgen = "*"
+[dev-dependencies]
+csv = "*"
 
 [profile.release]
 debug = true
