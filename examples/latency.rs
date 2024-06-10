@@ -2,6 +2,8 @@ use csv::Writer;
 use rand::Rng;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs::File;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread, vec};
@@ -41,11 +43,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // to_microseconds(&mut latencies);
 
-    let latencies = round_to_nearest_100(latencies);
+    write_nanos_to_file(latencies, write)?;
 
-    let latencies = nanos_vec_to_microseconds(latencies);
+    // let latencies = round_to_nearest_100(latencies);
 
-    write_latencies_to_csv_dup_f64(latencies, &csv_name(&pci_addr, write))?;
+    // let latencies = nanos_vec_to_microseconds(latencies);
+
+    // write_latencies_to_csv_dup_f64(latencies, &csv_name(&pci_addr, write))?;
 
     // to_microseconds(&mut latencies);
     // let percentiles = calculate_percentiles(&mut latencies);
@@ -63,6 +67,17 @@ fn csv_name(pci_addr: &str, write: bool) -> String {
         },
         if write { "write" } else { "read" }
     )
+}
+
+fn write_nanos_to_file(latencies: Vec<u128>, write: bool) -> Result<(), Box<dyn Error>> {
+    let mut file = File::create(format!(
+        "vroom_qd1_{}_latencies.txt",
+        if write { "write" } else { "read" }
+    ))?;
+    for lat in latencies {
+        writeln!(file, "{}", lat)?;
+    }
+    Ok(())
 }
 
 fn seconds_vec_to_microseconds(latencies: &mut [f64]) {
