@@ -1,12 +1,17 @@
 # vroom
 
 vroom is a userspace NVMe driver written in Rust.
-It aims to be as fast as the SPDK NVMe driver, while minimizing unsafe code and offering a simplified API and less code.
-vroom is at this point only a proof of concept and will be extended further.
+As an userspace driver which (optionally) uses VFIO, it can be run without root privileges.
+It aims to be as fast as the SPDK NVMe driver, while minimizing unsafe code and offering a simplified API.
+vroom currently serves as a proof of concept and has many features yet to be implemented.
+
+For further details take a look at [@bootreer](https://github.com/bootreer)'s [thesis](https://db.in.tum.de/people/sites/ellmann/theses/finished/24/pirhonen_writing_an_nvme_driver_in_rust.pdf) on vroom
+
+
 # Build instructions
 
-vroom needs to be compiled from source using the rust compiler.
-Enable hugepages:
+vroom needs to be compiled from source using rust's package manager `cargo`.
+Vroom uses hugepages, enable them using:
 
 ```bash
 cd vroom
@@ -59,3 +64,17 @@ To enable it manually:
 6. Bind the device to the `vfio-pci` driver. `echo $VENDOR_ID $DEVICE_ID > /sys/bus/pci/drivers/vfio-pci/new_id`
 7. Chown the device to the user. `chown $USER:$GROUP /dev/vfio/*`
 8. That's it! Now you can compile and run vroom as stated above!
+
+# Testing
+
+Currently there are a few integration tests implemented. It is necessary to first set an environment variable containing the NVMe PCI address, for example for `0000:00:01.0`:
+
+```bash
+export NVME_ADDR="0000:00:01.0"
+```
+
+Then, run the tests using:
+
+```bash
+cargo test
+```

@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread};
 use vroom::memory::*;
-use vroom::vfio::Vfio;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 #[allow(unused_variables, unused_mut)]
@@ -45,7 +44,6 @@ fn basic_test(nvme: NvmeDevice, duration: Option<Duration>) -> Result<NvmeDevice
     // let nvme = qd_wrapper(nvme, 0, 4, queue_depth, false, duration)?;
 
     let nvme = qd_wrapper(nvme, 0, 4, queue_depth, true, duration)?;
-
 
     Ok(nvme)
 }

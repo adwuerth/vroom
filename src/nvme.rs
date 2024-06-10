@@ -469,6 +469,7 @@ impl NvmeDevice {
         namespace
     }
 
+    // TODO: currently namespace 1 is hardcoded
     pub fn write(&mut self, data: &impl DmaSlice, mut lba: u64) -> Result<(), Box<dyn Error>> {
         for chunk in data.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
@@ -501,13 +502,8 @@ impl NvmeDevice {
         Ok(())
     }
 
-    pub fn read_copied(
-        &mut self,
-        ns_id: u32,
-        dest: &mut [u8],
-        mut lba: u64,
-    ) -> Result<(), Box<dyn Error>> {
-        let ns = *self.namespaces.get(&ns_id).unwrap();
+    pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<(), Box<dyn Error>> {
+        let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks_mut(128 * 4096) {
             let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
             self.namespace_io(1, blocks, lba, self.buffer.phys as u64, false)?;
