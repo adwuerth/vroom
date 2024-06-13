@@ -128,7 +128,7 @@ impl Allocating for Mmio {
         }
     }
 
-    /// Mmaps a pci resource and returns a pointer to the mapped memory.
+    /// Mmaps a pci resource0 and returns a pointer to the mapped memory.
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         let path = format!("/sys/bus/pci/devices/{}/resource0", self.pci_addr);
 

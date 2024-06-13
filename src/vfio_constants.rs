@@ -44,6 +44,7 @@ pub const VFIO_PCI_BAR0_REGION_INDEX: u32 = 0;
 
 pub const VFIO_IRQ_INFO_EVENTFD: u32 = 1 << 0;
 
+// Intel VTd consts
 // constants to determine IOMMU (guest) address width
 pub const VTD_CAP_MGAW_SHIFT: u8 = 16;
 pub const VTD_CAP_MGAW_MASK: u64 = 0x3f << VTD_CAP_MGAW_SHIFT;

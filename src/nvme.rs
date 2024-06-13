@@ -239,13 +239,12 @@ impl NvmeDevice {
             io_sq: NvmeSubQueue::new(QUEUE_LENGTH, 0, &allocator)?,
             io_cq: NvmeCompQueue::new(QUEUE_LENGTH, 0, &allocator)?,
             buffer: Dma::allocate(crate::memory::HUGE_PAGE_SIZE, &allocator)?,
-            prp_list: Dma::allocate(8 * 512, &allocator)?,
+            prp_list: Dma::allocate(8 * 512, &allocator)?, // 4KiB
             namespaces: HashMap::new(),
             stats: NvmeStats::default(),
             q_id: 1,
             allocator,
         };
-        // println!("dev has been set");
 
         for i in 1..512 {
             dev.prp_list[i - 1] = (dev.buffer.phys + i * 4096) as u64;

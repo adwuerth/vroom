@@ -6,7 +6,7 @@ use crate::ioallocator::{Allocating, IOAllocator};
 use crate::NvmeDevice;
 
 const HUGE_PAGE_BITS: u32 = 21;
-pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
+pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS; // 2 Mebibyte
 
 #[derive(Debug)]
 pub struct Dma<T> {
@@ -150,6 +150,7 @@ impl<T> Dma<T> {
     /// Allocates DMA Memory on a huge page
     pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Dma<T>, Box<dyn Error>> {
         let size = if size % HUGE_PAGE_SIZE != 0 {
+            println!("does this get used?");
             ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
         } else {
             size

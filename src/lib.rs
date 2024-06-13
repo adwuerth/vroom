@@ -20,6 +20,7 @@ mod pci;
 mod queues;
 pub mod vfio;
 
+mod page_sizes;
 #[allow(dead_code, clippy::identity_op)]
 mod vfio_constants;
 
