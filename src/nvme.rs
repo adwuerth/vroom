@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use std::error::Error;
-use std::hint::spin_loop;
-
 use crate::cmd::NvmeCommand;
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::memory::{Dma, DmaSlice};
 use crate::queues::*;
 use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
+use std::collections::HashMap;
+use std::error::Error;
+use std::hint::spin_loop;
 
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
@@ -188,6 +187,32 @@ impl NvmeQueuePair {
             return Some(());
         }
         None
+    }
+
+    pub fn quick_poll_result(&mut self) -> Result<Option<()>, std::io::Error> {
+        if let Some((tail, c_entry, _)) = self.comp_queue.complete() {
+            unsafe {
+                std::ptr::write_volatile(self.comp_queue.doorbell as *mut u32, tail as u32);
+            }
+            self.sub_queue.head = c_entry.sq_head as usize;
+            let status = c_entry.status >> 1;
+            if status != 0 {
+                let error_message = format!(
+                    "QUICK_POLL Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}\n{:?}",
+                    status,
+                    status & 0xFF,
+                    (status >> 8) & 0x7,
+                    c_entry
+                );
+                eprintln!("{}", error_message);
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error_message,
+                ));
+            }
+            return Ok(Some(()));
+        }
+        Ok(None)
     }
 }
 

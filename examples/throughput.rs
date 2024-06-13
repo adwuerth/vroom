@@ -35,7 +35,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 256, 16, duration, random, false)?;
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, true)?;
 
     Ok(())
 }
@@ -93,7 +93,7 @@ fn qd_n_multithread(
             let bytes = 512 * blocks as usize;
             let mut total = std::time::Duration::ZERO;
             let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
+                Dma::allocate_nvme(vroom::PAGESIZE_4KIB, &nvme.lock().unwrap()).unwrap();
 
             let mut qpair = nvme
                 .lock()

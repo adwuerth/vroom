@@ -20,9 +20,12 @@ mod pci;
 mod queues;
 pub mod vfio;
 
-mod page_sizes;
 #[allow(dead_code, clippy::identity_op)]
 mod vfio_constants;
+
+pub use memory::PAGESIZE_1GIB;
+pub use memory::PAGESIZE_2MIB;
+pub use memory::PAGESIZE_4KIB;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};

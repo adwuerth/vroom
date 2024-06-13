@@ -92,6 +92,7 @@ pub struct Event {
     pub data: u64,
 }
 
+pub(crate) const MAP_HUGE_2MB: i32 = 0x5400_0000; // 21 << 26
 pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
@@ -425,7 +426,7 @@ impl Allocating for Vfio {
                     libc::MAP_SHARED
                         | libc::MAP_ANONYMOUS
                         | libc::MAP_HUGETLB
-                        | crate::memory::MAP_HUGE_2MB
+                        | MAP_HUGE_2MB
                         | libc::MAP_FIXED,
                     -1,
                     0,
@@ -437,10 +438,7 @@ impl Allocating for Vfio {
                     ptr::null_mut(),
                     size,
                     libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED
-                        | libc::MAP_ANONYMOUS
-                        | libc::MAP_HUGETLB
-                        | crate::memory::MAP_HUGE_2MB,
+                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | MAP_HUGE_2MB,
                     -1,
                     0,
                 )
