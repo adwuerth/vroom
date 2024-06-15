@@ -35,7 +35,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, true)?;
+    let nvme = test_throughput_random(nvme, 1, 1, duration, random, true)?;
 
     Ok(())
 }
@@ -90,10 +90,11 @@ fn qd_n_multithread(
 
         let handle = thread::spawn(move || -> (u64, f64) {
             let mut rng = rand::thread_rng();
-            let bytes = 512 * blocks as usize;
+            let bytes = 512 * blocks as usize; // 4kib
             let mut total = std::time::Duration::ZERO;
             let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(vroom::PAGESIZE_4KIB, &nvme.lock().unwrap()).unwrap();
+                Dma::allocate_nvme(vroom::PAGESIZE_4KIB * queue_depth, &nvme.lock().unwrap())
+                    .unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -101,11 +102,12 @@ fn qd_n_multithread(
                 .create_io_queue_pair(QUEUE_LENGTH)
                 .unwrap();
 
-            let bytes_mult = queue_depth;
-            let rand_block = &(0..(bytes_mult * bytes))
+            let buffer_size = queue_depth * bytes;
+
+            let rand_block = &(0..buffer_size)
                 .map(|_| rand::random::<u8>())
                 .collect::<Vec<_>>()[..];
-            buffer[0..bytes_mult * bytes].copy_from_slice(rand_block);
+            buffer[0..buffer_size].copy_from_slice(rand_block);
 
             let mut outstanding_ops = 0;
             let mut total_io_ops = 0;
@@ -172,14 +174,12 @@ fn qd_1_singlethread(
     random: bool,
     duration: Duration,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
-
     let blocks = 8;
     let bytes = 512 * blocks;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1; // - blocks - 1;
 
     let mut rng = thread_rng();
-
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(vroom::PAGESIZE_4KIB, &nvme)?;
     let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
     buffer[..rand_block.len()].copy_from_slice(rand_block);
 

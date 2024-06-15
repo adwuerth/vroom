@@ -14,6 +14,7 @@ use std::ptr;
 use crate::vfio_constants::*;
 use lazy_static::lazy_static;
 
+use crate::memory;
 use crate::memory::Dma;
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
 use std::collections::HashMap;
@@ -381,10 +382,67 @@ impl Vfio {
 
         mgaw as u8
     }
+
+    fn allocate_4kib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        // todo test this
+        let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
+            // To support IOMMUs capable of 39 bit wide IOVAs only, we use
+            // 32 bit addresses.
+
+            // Allocate memory of the needed size with 32-bit address space
+            let addr = unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
+                    -1,
+                    0,
+                )
+            };
+
+            addr
+        } else {
+            // Allocate memory of the needed size
+            unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED | libc::MAP_ANONYMOUS,
+                    -1,
+                    0,
+                )
+            }
+        };
+
+        // This is the main IOMMU work: IOMMU DMA MAP the memory...
+        if ptr == libc::MAP_FAILED {
+            Err(format!(
+                "failed to memory map DMA-memory. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into())
+        } else {
+            let iova = self.map_dma(ptr as usize, size)?;
+
+            let memory = Dma {
+                virt: ptr as *mut T,
+                phys: iova,
+                size,
+            };
+
+            Ok(memory)
+        }
+    }
 }
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        if size == memory::PAGESIZE_4KIB || size == memory::PAGESIZE_1GIB {
+            return self.allocate_4kib(size);
+        }
+
         // todo test this
         let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use

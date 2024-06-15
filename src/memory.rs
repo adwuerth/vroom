@@ -151,13 +151,15 @@ impl IndexMut<RangeFull> for Dma<u8> {
 impl<T> Dma<T> {
     /// Allocates DMA Memory on a huge page
     pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Dma<T>, Box<dyn Error>> {
-        let size = if size % HUGE_PAGE_SIZE != 0 {
-            println!("does this get used?");
-            ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
-        } else {
-            size
-        };
+        // println!("size before: {size}");
+        // let size = if size % HUGE_PAGE_SIZE != 0 {
+        //     println!("does this get used?");
+        //     ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
+        // } else {
+        //     size
+        // };
 
+        println!("calling allocate with size: {size}");
         allocator.allocate::<T>(size)
     }
 
