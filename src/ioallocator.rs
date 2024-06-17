@@ -11,7 +11,7 @@ pub trait Allocating {
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>>;
 }
 
-/// IOAllocators UIO and VFIO, is necessary such that trait Allocating can be used as a object
+/// `IOAllocators` UIO and VFIO, is necessary such that trait Allocating can be used as a object
 pub enum IOAllocator {
     MmioAllocator(Mmio),
     VfioAllocator(Vfio),
@@ -19,7 +19,7 @@ pub enum IOAllocator {
 
 impl IOAllocator {
     /// Returns either UIO or VFIO, depending on if vfio is enabled
-    pub fn init(pci_addr: &str) -> Result<IOAllocator, Box<dyn Error>> {
+    pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         Ok(if Vfio::is_enabled(pci_addr) {
             println!("initializing Vfio");
             Self::VfioAllocator(Vfio::init(pci_addr)?)
@@ -28,7 +28,7 @@ impl IOAllocator {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-            Self::MmioAllocator(Mmio::init(pci_addr)?)
+            Self::MmioAllocator(Mmio::init(pci_addr))
         })
     }
 }

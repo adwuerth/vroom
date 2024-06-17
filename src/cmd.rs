@@ -1,4 +1,4 @@
-/// NVMe Spec 4.2
+/// `NVMe` Spec 4.2
 /// Submission queue entry
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C, packed)]
@@ -79,7 +79,7 @@ impl NvmeCommand {
         Self {
             opcode: 0,
             c_id,
-            cdw10: q_id as u32,
+            cdw10: u32::from(q_id),
             ..Default::default()
         }
     }
@@ -88,7 +88,7 @@ impl NvmeCommand {
         Self {
             opcode: 4,
             c_id,
-            cdw10: q_id as u32,
+            cdw10: u32::from(q_id),
             ..Default::default()
         }
     }
@@ -254,8 +254,8 @@ impl NvmeCommand {
         Self {
             c_id,
             d_ptr: [ptr0, ptr1],
-            cdw10: (numd << 16) | lid as u32,
-            cdw11: ((lpid as u32) << 16) | numd >> 16,
+            cdw10: (numd << 16) | u32::from(lid),
+            cdw11: (u32::from(lpid) << 16) | numd >> 16,
             ..Self::default()
         }
     }

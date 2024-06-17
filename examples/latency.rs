@@ -205,7 +205,7 @@ fn qd_n_multithread_latency_nanos(
             }
 
             assert!(qpair.sub_queue.is_empty());
-            nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
+            nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
         });
         threads.push(handle);
     }
@@ -345,16 +345,4 @@ fn write_latencies_to_csv_dup_f64(
 
     wtr.flush()?;
     Ok(())
-}
-
-fn fill_ns(nvme: &mut NvmeDevice) {
-    println!("filling namespace");
-    let buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme).unwrap();
-    let max_lba = nvme.namespaces.get(&1).unwrap().blocks - buffer.size as u64 / 512 - 1;
-    let blocks = buffer.size as u64 / 512;
-    let mut lba = 0;
-    while lba < max_lba - 512 {
-        nvme.write(&buffer, lba).unwrap();
-        lba += blocks;
-    }
 }

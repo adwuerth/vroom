@@ -9,12 +9,12 @@ use std::mem;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 #[allow(clippy::wildcard_imports)]
 use crate::vfio_constants::*;
 use lazy_static::lazy_static;
 
-use crate::memory;
 use crate::memory::Dma;
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ lazy_static! {
         Mutex::new(HashMap::new());
 }
 
-/// struct vfio_iommu_type1_dma_map, grabbed from linux/vfio.h
+/// struct `vfio_iommu_type1_dma_map`, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(C)]
@@ -37,7 +37,7 @@ struct vfio_iommu_type1_dma_map {
     size: usize,
 }
 
-/// struct vfio_group_status, grabbed from linux/vfio.h
+/// struct `vfio_group_status`, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct vfio_group_status {
@@ -45,7 +45,7 @@ struct vfio_group_status {
     flags: u32,
 }
 
-/// struct vfio_region_info, grabbed from linux/vfio.h
+/// struct `vfio_region_info`, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
 #[repr(C)]
 struct vfio_region_info {
@@ -57,7 +57,7 @@ struct vfio_region_info {
     offset: u64,
 }
 
-/// struct vfio_irq_set, grabbed from linux/vfio.h
+/// struct `vfio_irq_set`, grabbed from linux/vfio.h
 ///
 /// As this is a dynamically sized struct (has an array at the end) we need to use
 /// Dynamically Sized Types (DSTs) which can be found at
@@ -73,7 +73,7 @@ pub struct vfio_irq_set<T: ?Sized> {
     pub data: T,
 }
 
-/// struct vfio_irq_info, grabbed from linux/vfio.h
+/// struct `vfio_irq_info`, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_irq_info {
@@ -85,7 +85,7 @@ pub struct vfio_irq_info {
     /* Number of IRQs within this index */
 }
 
-/// 'libc::epoll_event' equivalent.
+/// `libc::epoll_event` equivalent.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Event {
@@ -93,7 +93,6 @@ pub struct Event {
     pub data: u64,
 }
 
-pub(crate) const MAP_HUGE_2MB: i32 = 0x5400_0000; // 21 << 26
 pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
@@ -102,27 +101,36 @@ pub struct Vfio {
 
 // from https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
 pub(crate) const X86_VA_WIDTH: u8 = 47;
-// todo iova width?
 
-/// Usually 47 is supported, in VMs only 39
-// pub const IOVA_WIDTH: u8 = 39;
-pub const IOVA_WIDTH: u8 = X86_VA_WIDTH;
+lazy_static! {
+    /// IOVA_WIDTH is usually greater or equals to 47, e.g. in VMs only 39
+    static ref IOVA_WIDTH: AtomicU8 = AtomicU8::new(X86_VA_WIDTH);
+}
 
 /// Implementation of Linux VFIO framework use virtual memory
 impl Vfio {
     /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
+    /// # Panics
+    /// # Errors
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let group_file: File;
         let group_fd: RawFd;
 
-        println!("initializing vfio with IOVA WIDTH = {IOVA_WIDTH}");
+        println!(
+            "initializing vfio with IOVA WIDTH = {}",
+            IOVA_WIDTH.load(Ordering::Relaxed)
+        );
 
         if Self::is_intel_iommu(pci_addr) {
             let mgaw = Self::get_intel_iommu_gaw(pci_addr);
 
-            if mgaw < IOVA_WIDTH {
-                println!("IOMMU supports only {} bit wide IOVAs, reduce IOVA_WIDTH in src/memory.rs if DMA mappings fail!", mgaw);
+            if mgaw < IOVA_WIDTH.load(Ordering::Relaxed) {
+                println!(
+                    "IOMMU only supports {mgaw} bit wide IOVAs. Setting IOVA_WIDTH to {mgaw}!"
+                );
             }
+
+            IOVA_WIDTH.store(mgaw, Ordering::Relaxed);
         } else {
             println!("Cannot determine IOVA width on non-Intel IOMMU, reduce IOVA_WIDTH in src/memory.rs if DMA mappings fail!");
         }
@@ -163,7 +171,9 @@ impl Vfio {
         let mut vfio_gfds = VFIO_GROUP_FILE_DESCRIPTORS.lock().unwrap();
 
         #[allow(clippy::map_entry)]
-        if !vfio_gfds.contains_key(&group) {
+        if vfio_gfds.contains_key(&group) {
+            group_fd = *vfio_gfds.get(&group).unwrap();
+        } else {
             // open the devices' group
             group_file = OpenOptions::new()
                 .read(true)
@@ -197,8 +207,6 @@ impl Vfio {
             }
 
             vfio_gfds.insert(group, group_fd);
-        } else {
-            group_fd = *vfio_gfds.get(&group).unwrap();
         }
 
         //    Enable the IOMMU model we want
@@ -231,6 +239,7 @@ impl Vfio {
         Ok(vfio)
     }
 
+    #[must_use]
     pub fn is_enabled(pci_addr: &str) -> bool {
         Path::new(&format!("/sys/bus/pci/devices/{pci_addr}/iommu_group")).exists()
     }
@@ -292,6 +301,7 @@ impl Vfio {
     }
 
     /// mmap a VFIO resource and returns a pointer to the mapped memory.
+    /// # Errors
     pub fn map_resource_index(&self, index: u32) -> Result<(*mut u8, usize), Box<dyn Error>> {
         let mut region_info: vfio_region_info = vfio_region_info {
             argsz: mem::size_of::<vfio_region_info>() as u32,
@@ -335,42 +345,69 @@ impl Vfio {
             )
             .into());
         }
-        let addr = ptr as *mut u8;
+        let addr = ptr.cast::<u8>();
 
         Ok((addr, len))
     }
 
-    pub fn map_dma(&self, ptr: usize, size: usize) -> Result<usize, Box<dyn Error>> {
-        let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
-            argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
-            vaddr: ptr as *mut u8,
-            size,
-            iova: ptr as *mut u8,
-            flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
-        };
-        let ioctl_result =
-            unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
-        if ioctl_result != -1 {
-            Ok(iommu_dma_map.iova as usize)
-        } else {
+    /// Maps a memory region for DMA.
+    /// # Errors
+    pub fn map_dma<T>(
+        &self,
+        ptr: *mut libc::c_void,
+        size: usize,
+    ) -> Result<Dma<T>, Box<dyn Error>> {
+        // This is the main IOMMU work: IOMMU DMA MAP the memory...
+        if ptr == libc::MAP_FAILED {
             Err(format!(
-                "failed to map the DMA memory (ulimit set?). Errno: {}",
+                "failed to memory map DMA-memory. Errno: {}",
                 std::io::Error::last_os_error()
             )
             .into())
+        } else {
+            let ptr = ptr as usize;
+            let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
+                argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
+                vaddr: ptr as *mut u8,
+                size,
+                iova: ptr as *mut u8,
+                flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
+            };
+            let ioctl_result =
+                unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
+            let iova = if ioctl_result == -1 {
+                return Err(format!(
+                    "failed to map the DMA memory (ulimit set?). Errno: {}",
+                    std::io::Error::last_os_error()
+                )
+                .into());
+            } else {
+                iommu_dma_map.iova as usize
+            };
+
+            let memory = Dma {
+                virt: ptr as *mut T,
+                phys: iova,
+                size,
+            };
+
+            Ok(memory)
         }
     }
 
     /// Checks if the IOMMU is from Intel.
+    #[allow(clippy::must_use_candidate)]
     pub fn is_intel_iommu(pci_addr: &str) -> bool {
         Path::new(&format!(
-            "/sys/bus/pci/devices/{}/iommu/intel-iommu",
-            pci_addr
+            "/sys/bus/pci/devices/{pci_addr}/iommu/intel-iommu"
         ))
         .exists()
     }
 
     /// Returns the IOMMU guest address width.
+    /// # Panics
+    /// Panics when the IOMMU capabilities file cannot be read, or when the hex string cannot be converted to a u64.
+    #[allow(clippy::must_use_candidate)]
     pub fn get_intel_iommu_gaw(pci_addr: &str) -> u8 {
         let mut iommu_cap_file = pci_open_resource_ro(pci_addr, "iommu/intel-iommu/cap")
             .expect("failed to read IOMMU capabilities");
@@ -383,68 +420,23 @@ impl Vfio {
         mgaw as u8
     }
 
-    fn allocate_4kib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        // todo test this
-        let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
-            // To support IOMMUs capable of 39 bit wide IOVAs only, we use
-            // 32 bit addresses.
-
-            // Allocate memory of the needed size with 32-bit address space
-            let addr = unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
-                    -1,
-                    0,
-                )
-            };
-
-            addr
-        } else {
-            // Allocate memory of the needed size
-            unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED | libc::MAP_ANONYMOUS,
-                    -1,
-                    0,
-                )
-            }
+    fn allocate_1gib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        let ptr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | libc::MAP_HUGE_1GB,
+                -1,
+                0,
+            )
         };
 
-        // This is the main IOMMU work: IOMMU DMA MAP the memory...
-        if ptr == libc::MAP_FAILED {
-            Err(format!(
-                "failed to memory map DMA-memory. Errno: {}",
-                std::io::Error::last_os_error()
-            )
-            .into())
-        } else {
-            let iova = self.map_dma(ptr as usize, size)?;
-
-            let memory = Dma {
-                virt: ptr as *mut T,
-                phys: iova,
-                size,
-            };
-
-            Ok(memory)
-        }
+        self.map_dma(ptr, size)
     }
-}
 
-impl Allocating for Vfio {
-    fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        if size == memory::PAGESIZE_4KIB || size == memory::PAGESIZE_1GIB {
-            return self.allocate_4kib(size);
-        }
-
-        // todo test this
-        let ptr = if IOVA_WIDTH < X86_VA_WIDTH {
+    fn allocate_2mib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        let ptr = if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
             // using libc::MAP_HUGETLB, we create a 32-bit address with the
@@ -478,13 +470,13 @@ impl Allocating for Vfio {
             // finally map huge pages at the huge page size aligned 32-bit address
             unsafe {
                 libc::mmap(
-                    aligned_addr as *mut libc::c_void,
+                    aligned_addr.cast::<libc::c_void>(),
                     size,
                     libc::PROT_READ | libc::PROT_WRITE,
                     libc::MAP_SHARED
                         | libc::MAP_ANONYMOUS
                         | libc::MAP_HUGETLB
-                        | MAP_HUGE_2MB
+                        | libc::MAP_HUGE_2MB
                         | libc::MAP_FIXED,
                     -1,
                     0,
@@ -496,31 +488,54 @@ impl Allocating for Vfio {
                     ptr::null_mut(),
                     size,
                     libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | MAP_HUGE_2MB,
+                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | libc::MAP_HUGE_2MB,
                     -1,
                     0,
                 )
             }
         };
 
-        // This is the main IOMMU work: IOMMU DMA MAP the memory...
-        if ptr == libc::MAP_FAILED {
-            Err(format!(
-                "failed to memory map DMA-memory. Errno: {}",
-                std::io::Error::last_os_error()
-            )
-            .into())
+        self.map_dma(ptr, size)
+    }
+
+    fn allocate_4kib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        // todo test this
+        let ptr = if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
+            // To support IOMMUs capable of 39 bit wide IOVAs only, we use
+            // 32 bit addresses.
+
+            // Allocate memory of the needed size with 32-bit address space
+            unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
+                    -1,
+                    0,
+                )
+            }
         } else {
-            let iova = self.map_dma(ptr as usize, size)?;
+            // Allocate memory of the needed size
+            unsafe {
+                libc::mmap(
+                    ptr::null_mut(),
+                    size,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED | libc::MAP_ANONYMOUS,
+                    -1,
+                    0,
+                )
+            }
+        };
 
-            let memory = Dma {
-                virt: ptr as *mut T,
-                phys: iova,
-                size,
-            };
+        self.map_dma(ptr, size)
+    }
+}
 
-            Ok(memory)
-        }
+impl Allocating for Vfio {
+    fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        self.allocate_4kib(size)
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {

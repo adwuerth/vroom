@@ -1,10 +1,10 @@
 use crate::cmd::NvmeCommand;
 use crate::ioallocator::IOAllocator;
-use crate::memory::*;
+use crate::memory::Dma;
 use std::error::Error;
 use std::hint::spin_loop;
 
-/// NVMe spec 4.6
+/// `NVMe` spec 4.6
 /// Completion queue entry
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -52,11 +52,11 @@ impl NvmeSubQueue {
         })
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.head == self.tail
     }
 
-    pub fn is_full(&self) -> bool {
+    pub const fn is_full(&self) -> bool {
         self.head == (self.tail + 1) % self.len
     }
 
@@ -77,7 +77,7 @@ impl NvmeSubQueue {
         self.tail
     }
 
-    pub fn get_addr(&self) -> usize {
+    pub const fn get_addr(&self) -> usize {
         self.commands.phys
     }
 }
@@ -148,7 +148,7 @@ impl NvmeCompQueue {
         }
     }
 
-    pub fn get_addr(&self) -> usize {
+    pub const fn get_addr(&self) -> usize {
         self.commands.phys
     }
 }

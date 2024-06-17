@@ -5,12 +5,12 @@ use std::slice;
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::NvmeDevice;
 
-const HUGE_PAGE_BITS: u32 = 21;
-pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS; // 2 Mebibyte
+pub const HUGE_PAGE_BITS: u32 = 21;
+pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
 
 pub const PAGESIZE_4KIB: usize = 1024 * 4;
 pub const PAGESIZE_2MIB: usize = 1024 * 1024 * 2;
-pub const PAGESIZE_1GIB: usize = 1024 * 1024 * 1024 * 1;
+pub const PAGESIZE_1GIB: usize = 1024 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct Dma<T> {
@@ -149,21 +149,22 @@ impl IndexMut<RangeFull> for Dma<u8> {
 }
 
 impl<T> Dma<T> {
-    /// Allocates DMA Memory on a huge page
-    pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Dma<T>, Box<dyn Error>> {
-        // println!("size before: {size}");
-        // let size = if size % HUGE_PAGE_SIZE != 0 {
-        //     println!("does this get used?");
-        //     ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
-        // } else {
-        //     size
-        // };
-
+    /// Allocates DMA Memory on a huge page using an `IOAllocator`
+    /// # Arguments
+    /// * `size` - The size of the memory to allocate
+    /// * `allocator` - The allocator to use
+    /// # Errors
+    pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
         println!("calling allocate with size: {size}");
         allocator.allocate::<T>(size)
     }
 
-    pub fn allocate_nvme(size: usize, nvme: &NvmeDevice) -> Result<Dma<T>, Box<dyn Error>> {
+    /// Allocates DMA Memory on a huge page using a specific `NVMe` device
+    /// # Arguments
+    /// * `size` - The size of the memory to allocate
+    /// * `nvme` - The `NVMe` device to use
+    /// # Errors
+    pub fn allocate_nvme(size: usize, nvme: &NvmeDevice) -> Result<Self, Box<dyn Error>> {
         Self::allocate(size, &nvme.allocator)
     }
 }

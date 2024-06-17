@@ -139,7 +139,7 @@ fn qd_n_multithread(
             }
             total_io_ops += outstanding_ops as u64;
             assert!(qpair.sub_queue.is_empty());
-            nvme.lock().unwrap().delete_io_queue_pair(qpair).unwrap();
+            nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
 
             (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
         });
@@ -210,16 +210,4 @@ fn qd_1_singlethread(
         ios as f64 / total.as_secs_f64()
     );
     Ok(nvme)
-}
-
-fn fill_ns(nvme: &mut NvmeDevice) {
-    println!("filling namespace");
-    let buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme).unwrap();
-    let max_lba = nvme.namespaces.get(&1).unwrap().blocks - buffer.size as u64 / 512 - 1;
-    let blocks = buffer.size as u64 / 512;
-    let mut lba = 0;
-    while lba < max_lba - 512 {
-        nvme.write(&buffer, lba).unwrap();
-        lba += blocks;
-    }
 }

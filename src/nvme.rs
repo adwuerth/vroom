@@ -1,7 +1,7 @@
 use crate::cmd::NvmeCommand;
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::memory::{Dma, DmaSlice};
-use crate::queues::*;
+use crate::queues::{NvmeCompQueue, NvmeCompletion, NvmeSubQueue, QUEUE_LENGTH};
 use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE};
 use std::collections::HashMap;
 use std::error::Error;
@@ -9,7 +9,7 @@ use std::hint::spin_loop;
 
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
-pub enum NvmeRegs32 {
+enum NvmeRegs32 {
     VS = 0x8,        // Version
     INTMS = 0xC,     // Interrupt Mask Set
     INTMC = 0x10,    // Interrupt Mask Clear
@@ -32,7 +32,7 @@ pub enum NvmeRegs32 {
 
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
-pub enum NvmeRegs64 {
+enum NvmeRegs64 {
     CAP = 0x0,      // Controller Capabilities
     ASQ = 0x28,     // Admin Submission Queue Base Address
     ACQ = 0x30,     // Admin Completion Queue Base Address
@@ -42,7 +42,7 @@ pub enum NvmeRegs64 {
 
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum NvmeArrayRegs {
+enum NvmeArrayRegs {
     SQyTDBL,
     CQyHDBL,
 }
@@ -147,6 +147,8 @@ impl NvmeQueuePair {
     }
 
     // TODO: maybe return result
+    ///
+    /// # Panics
     pub fn complete_io(&mut self, n: usize) -> Option<u16> {
         assert!(n > 0);
         let (tail, c_entry, _) = self.comp_queue.complete_n(n);
@@ -162,7 +164,7 @@ impl NvmeQueuePair {
                 status & 0xFF,
                 (status >> 8) & 0x7
             );
-            eprintln!("{:?}", c_entry);
+            eprintln!("{c_entry:?}");
             return None;
         }
         Some(c_entry.sq_head)
@@ -182,13 +184,15 @@ impl NvmeQueuePair {
                     status & 0xFF,
                     (status >> 8) & 0x7
                 );
-                eprintln!("{:?}", c_entry);
+                eprintln!("{c_entry:?}");
             }
             return Some(());
         }
         None
     }
 
+    ///
+    /// # Errors
     pub fn quick_poll_result(&mut self) -> Result<Option<()>, std::io::Error> {
         if let Some((tail, c_entry, _)) = self.comp_queue.complete() {
             unsafe {
@@ -204,7 +208,7 @@ impl NvmeQueuePair {
                     (status >> 8) & 0x7,
                     c_entry
                 );
-                eprintln!("{}", error_message);
+                eprintln!("{error_message}");
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     error_message,
@@ -242,6 +246,10 @@ unsafe impl Sync for NvmeDevice {}
 
 #[allow(unused)]
 impl NvmeDevice {
+    /// Initialises `NVMe` device
+    /// # Arguments
+    /// * `pci_addr` - pci address of the device
+    /// # Errors
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
@@ -352,6 +360,8 @@ impl NvmeDevice {
         Ok(dev)
     }
 
+    /// Identify `NVMe` Controller
+    /// # Errors    
     pub fn identify_controller(&mut self) -> Result<(), Box<dyn Error>> {
         println!("Trying to identify controller");
         let _entry = self.submit_and_complete_admin(NvmeCommand::identify_controller);
@@ -394,6 +404,9 @@ impl NvmeDevice {
     }
 
     // 1 to 1 Submission/Completion Queue Mapping
+    ///
+    /// # Panics
+    /// # Errors
     pub fn create_io_queue_pair(&mut self, len: usize) -> Result<NvmeQueuePair, Box<dyn Error>> {
         let q_id = self.q_id;
         println!("Requesting i/o queue pair with id {q_id}");
@@ -433,7 +446,8 @@ impl NvmeDevice {
         })
     }
 
-    pub fn delete_io_queue_pair(&mut self, qpair: NvmeQueuePair) -> Result<(), Box<dyn Error>> {
+    /// # Errors
+    pub fn delete_io_queue_pair(&mut self, qpair: &NvmeQueuePair) -> Result<(), Box<dyn Error>> {
         println!("Deleting i/o queue pair with id {}", qpair.id);
         self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::delete_io_submission_queue(c_id, qpair.id)
@@ -475,10 +489,10 @@ impl NvmeDevice {
         // figure out block size
         let flba_idx = (namespace_data.flbas & 0xF) as usize;
         let flba_data = (namespace_data.lba_format_support[flba_idx] >> 16) & 0xFF;
-        let block_size = if !(9..32).contains(&flba_data) {
-            0
-        } else {
+        let block_size = if (9..32).contains(&flba_data) {
             1 << flba_data
+        } else {
+            0
         };
 
         // TODO: check metadata?
@@ -493,44 +507,51 @@ impl NvmeDevice {
         namespace
     }
 
-    // TODO: currently namespace 1 is hardcoded
+    /// TODO: currently namespace 1 is hardcoded
+    /// # Errors
     pub fn write(&mut self, data: &impl DmaSlice, mut lba: u64) -> Result<(), Box<dyn Error>> {
         for chunk in data.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
-            self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, true)?;
+            self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, true);
             lba += blocks;
         }
 
         Ok(())
     }
 
+    /// `NVMe` read to `DmaSlice`
+    /// # Errors
     pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<(), Box<dyn Error>> {
         // let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
-            self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, false)?;
+            self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, false);
             lba += blocks;
         }
         Ok(())
     }
 
+    /// # Errors
+    /// # Panics
     pub fn write_copied(&mut self, data: &[u8], mut lba: u64) -> Result<(), Box<dyn Error>> {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in data.chunks(128 * 4096) {
             self.buffer[..chunk.len()].copy_from_slice(chunk);
             let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
-            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, true)?;
+            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, true);
             lba += blocks;
         }
 
         Ok(())
     }
 
+    /// # Errors
+    /// # Panics
     pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<(), Box<dyn Error>> {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks_mut(128 * 4096) {
             let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
-            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, false)?;
+            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, false);
             lba += blocks;
             chunk.copy_from_slice(&self.buffer[..chunk.len()]);
         }
@@ -596,13 +617,15 @@ impl NvmeDevice {
                 status & 0xFF,
                 (status >> 8) & 0x7
             );
-            eprintln!("{:?}", c_entry);
+            eprintln!("{c_entry:?}");
             return None;
         }
         self.stats.completions += 1;
         Some(c_entry.sq_head)
     }
 
+    /// # Errors
+    /// # Panics
     pub fn batched_write(
         &mut self,
         ns_id: u32,
@@ -643,6 +666,8 @@ impl NvmeDevice {
         Ok(())
     }
 
+    /// # Errors
+    /// # Panics
     pub fn batched_read(
         &mut self,
         ns_id: u32,
@@ -683,14 +708,7 @@ impl NvmeDevice {
     }
 
     #[inline(always)]
-    fn namespace_io(
-        &mut self,
-        ns_id: u32,
-        blocks: u64,
-        lba: u64,
-        addr: u64,
-        write: bool,
-    ) -> Result<(), Box<dyn Error>> {
+    fn namespace_io(&mut self, ns_id: u32, blocks: u64, lba: u64, addr: u64, write: bool) {
         assert!(blocks > 0);
         assert!(blocks <= 0x1_0000);
 
@@ -731,7 +749,6 @@ impl NvmeDevice {
 
         self.write_reg_idx(NvmeArrayRegs::SQyTDBL, q_id as u16, tail as u32);
         self.io_sq.head = self.complete_io(1).unwrap() as usize;
-        Ok(())
     }
 
     fn submit_and_complete_admin<F: FnOnce(u16, usize) -> NvmeCommand>(
@@ -756,6 +773,7 @@ impl NvmeDevice {
         Ok(entry)
     }
 
+    /// # Panics
     pub fn clear_namespace(&mut self, ns_id: Option<u32>) {
         let ns_id = if let Some(ns_id) = ns_id {
             assert!(self.namespaces.contains_key(&ns_id));

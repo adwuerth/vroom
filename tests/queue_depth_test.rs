@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use std::error::Error;
 use std::process;
 use std::time::{Duration, Instant};
@@ -97,7 +97,7 @@ fn qd_n(
         total += before.elapsed();
     }
     assert!(qpair.sub_queue.is_empty());
-    nvme.delete_io_queue_pair(qpair).unwrap_or_else(|e| {
+    nvme.delete_io_queue_pair(&qpair).unwrap_or_else(|e| {
         eprintln!("Deletion of io queue pair failed: {}", e);
         process::exit(1);
     });

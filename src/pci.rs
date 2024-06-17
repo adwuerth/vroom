@@ -15,13 +15,13 @@ pub const INTERRUPT_DISABLE: u64 = 10;
 
 /// Opens a pci resource file at the given address.
 pub fn pci_open_resource(pci_addr: &str, resource: &str) -> Result<File, Box<dyn Error>> {
-    let path = format!("/sys/bus/pci/devices/{}/{}", pci_addr, resource);
+    let path = format!("/sys/bus/pci/devices/{pci_addr}/{resource}");
     Ok(OpenOptions::new().read(true).write(true).open(path)?)
 }
 
 /// Opens a pci resource file at the given address in read-only mode.
 pub fn pci_open_resource_ro(pci_addr: &str, resource: &str) -> Result<File, Box<dyn Error>> {
-    let path = format!("/sys/bus/pci/devices/{}/{}", pci_addr, resource);
+    let path = format!("/sys/bus/pci/devices/{pci_addr}/{resource}");
     Ok(OpenOptions::new().read(true).write(false).open(path)?)
 }
 

@@ -10,16 +10,18 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io, mem, process, ptr};
 
-pub(crate) static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
+use crate::memory;
+
+static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
 pub struct Mmio {
     pci_addr: String,
 }
 
 impl Mmio {
-    pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn init(pci_addr: &str) -> Self {
         let pci_addr = pci_addr.to_string();
-        Ok(Mmio { pci_addr })
+        Self { pci_addr }
     }
 
     /// Translates a virtual address to its physical counterpart
@@ -67,7 +69,7 @@ impl Mmio {
         }
     }
 
-    /// Disable INTx interrupts for the device.
+    /// Disable `INTx` interrupts for the device.
     pub fn disable_interrupts(&self) -> Result<(), Box<dyn Error>> {
         let path = format!("/sys/bus/pci/devices/{}/config", self.pci_addr);
         let mut file = fs::OpenOptions::new().read(true).write(true).open(path)?;
@@ -82,6 +84,13 @@ impl Mmio {
 
 impl Allocating for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+        let size = if size % memory::HUGE_PAGE_SIZE != 0 {
+            println!("does this get used?");
+            ((size >> memory::HUGE_PAGE_BITS) + 1) << memory::HUGE_PAGE_BITS
+        } else {
+            size
+        };
+
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
 
@@ -108,7 +117,7 @@ impl Allocating for Mmio {
                 } else if unsafe { libc::mlock(ptr, size) } == 0 {
                     let memory = Dma {
                         // virt: NonNull::new(ptr as *mut T).expect("oops"),
-                        virt: ptr as *mut T,
+                        virt: ptr.cast::<T>(),
                         phys: Self::virt_to_phys(ptr as usize)?,
                         size,
                     };
@@ -119,10 +128,7 @@ impl Allocating for Mmio {
             }
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => Err(Box::new(io::Error::new(
                 e.kind(),
-                format!(
-                    "huge page {} could not be created - huge pages enabled?",
-                    path
-                ),
+                format!("huge page {path} could not be created - huge pages enabled?"),
             ))),
             Err(e) => Err(Box::new(e)),
         }
@@ -150,7 +156,8 @@ impl Allocating for Mmio {
                 libc::MAP_SHARED,
                 file.as_raw_fd(),
                 0,
-            ) as *mut u8
+            )
+            .cast::<u8>()
         };
 
         if ptr.is_null() || len == 0 {

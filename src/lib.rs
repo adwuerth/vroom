@@ -1,10 +1,11 @@
-// #![warn(
-//     clippy::all,
-//     //clippy::restriction,
-//     clippy::pedantic,
-//     clippy::nursery,
-//     clippy::cargo
-// )]
+#![warn(
+    clippy::all,
+    //clippy::restriction,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo
+)]
+#![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_arm_hints))]
 #[allow(unused)]
 mod cmd;
@@ -33,9 +34,11 @@ use pci::{pci_open_resource_ro, read_hex, read_io32};
 pub use queues::QUEUE_LENGTH;
 use std::error::Error;
 
-/**
- * Initializes the driver
- */
+/// initialise driver
+/// # Arguments
+/// * `pci_addr` - pci address of the device
+/// # Panics
+/// # Errors
 pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
@@ -48,7 +51,7 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
     // 0x01 -> mass storage device class id
     // 0x08 -> nvme subclass
     if class_id != 0x0108 {
-        return Err(format!("device {} is not a block device", pci_addr).into());
+        return Err(format!("device {pci_addr} is not a block device").into());
     }
 
     let mut nvme = NvmeDevice::init(pci_addr)?;
