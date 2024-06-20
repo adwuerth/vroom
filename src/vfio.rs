@@ -37,6 +37,18 @@ struct vfio_iommu_type1_dma_map {
     size: usize,
 }
 
+/// struct `vfio_iommu_type1_dma_unmap`, grabbed from linux/vfio.h
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+#[repr(C)]
+struct vfio_iommu_type1_dma_unmap {
+    argsz: u32,
+    flags: u32,
+    iova: *mut u8, /* IO virtual address */
+    size: usize,   /* Size of mapping (bytes) */
+    data: *mut libc::c_void,
+}
+
 /// struct `vfio_group_status`, grabbed from linux/vfio.h
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -263,11 +275,12 @@ impl Vfio {
             ).into());
         }
 
+        // Read current value of command register
         let mut dma: u16 = 0;
         if unsafe {
             libc::pread(
                 self.device_fd,
-                &mut dma as *mut _ as *mut libc::c_void,
+                std::ptr::addr_of_mut!(dma).cast::<libc::c_void>(),
                 2,
                 (conf_reg.offset + COMMAND_REGISTER_OFFSET) as i64,
             )
@@ -280,12 +293,13 @@ impl Vfio {
             .into());
         }
 
+        // Set the bus master enable bit
         dma |= 1 << BUS_MASTER_ENABLE_BIT;
 
         if unsafe {
             libc::pwrite(
                 self.device_fd,
-                &mut dma as *mut _ as *mut libc::c_void,
+                std::ptr::addr_of_mut!(dma).cast::<libc::c_void>(),
                 2,
                 (conf_reg.offset + COMMAND_REGISTER_OFFSET) as i64,
             )
@@ -359,40 +373,65 @@ impl Vfio {
     ) -> Result<Dma<T>, Box<dyn Error>> {
         // This is the main IOMMU work: IOMMU DMA MAP the memory...
         if ptr == libc::MAP_FAILED {
-            Err(format!(
+            return Err(format!(
                 "failed to memory map DMA-memory. Errno: {}",
                 std::io::Error::last_os_error()
             )
-            .into())
-        } else {
-            let ptr = ptr as usize;
-            let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
-                argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
-                vaddr: ptr as *mut u8,
-                size,
-                iova: ptr as *mut u8,
-                flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
-            };
-            let ioctl_result =
-                unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
-            let iova = if ioctl_result == -1 {
-                return Err(format!(
-                    "failed to map the DMA memory (ulimit set?). Errno: {}",
-                    std::io::Error::last_os_error()
-                )
-                .into());
-            } else {
-                iommu_dma_map.iova as usize
-            };
-
-            let memory = Dma {
-                virt: ptr as *mut T,
-                phys: iova,
-                size,
-            };
-
-            Ok(memory)
+            .into());
         }
+        let ptr = ptr as usize;
+        let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
+            argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
+            vaddr: ptr as *mut u8,
+            size,
+            iova: ptr as *mut u8,
+            flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
+        };
+        println!(
+            "Mapping DMA memory at {:p} with size {} and iommu_dma_map at {:?}",
+            ptr as *mut T, size, iommu_dma_map
+        );
+        let ioctl_result =
+            unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
+        let iova = if ioctl_result == -1 {
+            return Err(format!(
+                "failed to map the DMA memory (ulimit set?). Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into());
+        } else {
+            iommu_dma_map.iova as usize
+        };
+
+        let memory = Dma {
+            virt: ptr as *mut T,
+            phys: iova,
+            size,
+        };
+
+        Ok(memory)
+    }
+
+    /// Maps a memory region for DMA.
+    /// # Errors
+    pub fn unmap_dma(&self, ptr: *mut libc::c_void, size: usize) -> Result<(), Box<dyn Error>> {
+        let dma_unmap = vfio_iommu_type1_dma_unmap {
+            argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
+            iova: ptr.cast::<u8>(),
+            size,
+            flags: 0,
+            data: ptr::null_mut(),
+        };
+
+        if unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_UNMAP_DMA, &dma_unmap) } < 0 {
+            return Err(format!(
+                "failed to unmap the DMA memory. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     /// Checks if the IOMMU is from Intel.
@@ -418,6 +457,21 @@ impl Vfio {
         let mgaw = ((iommu_cap & VTD_CAP_MGAW_MASK) >> VTD_CAP_MGAW_SHIFT) + 1;
 
         mgaw as u8
+    }
+
+    pub fn manual_alloc(&self, size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
+        let ptr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+
+        Ok(ptr)
     }
 
     fn allocate_1gib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {

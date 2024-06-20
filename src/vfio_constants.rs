@@ -26,6 +26,7 @@ pub const VFIO_GROUP_FLAGS_VIABLE: u32 = 1 << 0;
 pub const VFIO_DMA_MAP_FLAG_READ: u32 = 1 << 0;
 pub const VFIO_DMA_MAP_FLAG_WRITE: u32 = 1 << 1;
 pub const VFIO_IOMMU_MAP_DMA: u64 = _IO(VFIO_TYPE, VFIO_BASE + 13);
+pub const VFIO_IOMMU_UNMAP_DMA: u64 = _IO(VFIO_TYPE, VFIO_BASE + 14);
 
 // constants needed for IOMMU Interrupts. Grabbed from linux/vfio.h
 pub const VFIO_DEVICE_GET_IRQ_INFO: u64 = _IO(VFIO_TYPE, VFIO_BASE + 9);

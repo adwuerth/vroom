@@ -3,6 +3,7 @@ use std::error::Error;
 use vroom::memory::*;
 
 use std::{env, process};
+use vroom::Allocating;
 use vroom::NvmeDevice;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -26,7 +27,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
 fn fill_ns(nvme: &mut NvmeDevice) {
     println!("filling namespace");
-    let buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme).unwrap();
+    let buffer: Dma<u8> = nvme.allocate(PAGESIZE_2MIB).unwrap();
     let max_lba = nvme.namespaces.get(&1).unwrap().blocks - buffer.size as u64 / 512 - 1;
     let blocks = buffer.size as u64 / 512;
     let mut lba = 0;

@@ -1,15 +1,9 @@
-#![warn(
-    clippy::all,
-    //clippy::restriction,
-    clippy::pedantic,
-    clippy::nursery,
-    clippy::cargo
-)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_arm_hints))]
 #[allow(unused)]
 mod cmd;
-mod ioallocator;
+pub mod ioallocator;
 #[allow(dead_code)]
 pub mod memory;
 mod mmio;
@@ -28,6 +22,8 @@ pub use memory::PAGESIZE_1GIB;
 pub use memory::PAGESIZE_2MIB;
 pub use memory::PAGESIZE_4KIB;
 
+pub use ioallocator::Allocating;
+
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};
 use pci::{pci_open_resource_ro, read_hex, read_io32};
@@ -38,7 +34,9 @@ use std::error::Error;
 /// # Arguments
 /// * `pci_addr` - pci address of the device
 /// # Panics
+/// Panics if the device cant be found
 /// # Errors
+/// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
 pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");

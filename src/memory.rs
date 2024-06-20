@@ -148,16 +148,17 @@ impl IndexMut<RangeFull> for Dma<u8> {
     }
 }
 
+/// Basically legacy code
 impl<T> Dma<T> {
     /// Allocates DMA Memory on a huge page using an `IOAllocator`
     /// # Arguments
     /// * `size` - The size of the memory to allocate
     /// * `allocator` - The allocator to use
     /// # Errors
-    pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
-        println!("calling allocate with size: {size}");
-        allocator.allocate::<T>(size)
-    }
+    // pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
+    //     println!("calling allocate with size: {size}");
+    //     allocator.allocate::<T>(size)
+    // }
 
     /// Allocates DMA Memory on a huge page using a specific `NVMe` device
     /// # Arguments
@@ -165,6 +166,9 @@ impl<T> Dma<T> {
     /// * `nvme` - The `NVMe` device to use
     /// # Errors
     pub fn allocate_nvme(size: usize, nvme: &NvmeDevice) -> Result<Self, Box<dyn Error>> {
-        Self::allocate(size, &nvme.allocator)
+        // Self::allocate(size, &nvme.allocator)
+
+        println!("calling allocate with size: {size}");
+        nvme.allocate(size)
     }
 }
