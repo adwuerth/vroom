@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::must_use_candidate)]
 
 use crate::ioallocator::Allocating;
 use crate::HUGE_PAGE_SIZE;
@@ -6,10 +7,13 @@ use std::error::Error;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
+use std::os::raw::c_void;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicU8, Ordering};
+
+use std::io::Write;
 
 #[allow(clippy::wildcard_imports)]
 use crate::vfio_constants::*;
@@ -119,7 +123,7 @@ lazy_static! {
     static ref IOVA_WIDTH: AtomicU8 = AtomicU8::new(X86_VA_WIDTH);
 }
 
-/// Implementation of Linux VFIO framework use virtual memory
+/// Implementation of Linux VFIO framework for direct device access.
 impl Vfio {
     /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
     /// # Panics
@@ -314,7 +318,8 @@ impl Vfio {
         Ok(())
     }
 
-    /// mmap a VFIO resource and returns a pointer to the mapped memory.
+    /// mmap the io device into host memory, and return a pointer to the mapped memory.
+    /// This enables direct access to the device's memory.
     /// # Errors
     pub fn map_resource_index(&self, index: u32) -> Result<(*mut u8, usize), Box<dyn Error>> {
         let mut region_info: vfio_region_info = vfio_region_info {
@@ -387,10 +392,10 @@ impl Vfio {
             iova: ptr as *mut u8,
             flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
         };
-        println!(
-            "Mapping DMA memory at {:p} with size {} and iommu_dma_map at {:?}",
-            ptr as *mut T, size, iommu_dma_map
-        );
+        // println!(
+        //     "Mapping DMA memory at {:p} with size {} and iommu_dma_map at {:?}",
+        //     ptr as *mut T, size, iommu_dma_map
+        // );
         let ioctl_result =
             unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
         let iova = if ioctl_result == -1 {
@@ -459,23 +464,9 @@ impl Vfio {
         mgaw as u8
     }
 
-    pub fn manual_alloc(&self, size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
-        let ptr = unsafe {
-            libc::mmap(
-                ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED | libc::MAP_ANONYMOUS,
-                -1,
-                0,
-            )
-        };
-
-        Ok(ptr)
-    }
-
-    fn allocate_1gib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let ptr = unsafe {
+    /// Allocate `size` bytes memory with 1 GiB page size on the host device. Returns pointer to allocated memory
+    pub fn allocate_1gib(size: usize) -> *mut libc::c_void {
+        unsafe {
             libc::mmap(
                 ptr::null_mut(),
                 size,
@@ -484,13 +475,12 @@ impl Vfio {
                 -1,
                 0,
             )
-        };
-
-        self.map_dma(ptr, size)
+        }
     }
 
-    fn allocate_2mib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let ptr = if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
+    /// Allocate `size` bytes memory with 2 MiB page size on the host device. Returns pointer to allocated memory
+    pub fn allocate_2mib(size: usize) -> *mut libc::c_void {
+        if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
             // using libc::MAP_HUGETLB, we create a 32-bit address with the
@@ -547,14 +537,12 @@ impl Vfio {
                     0,
                 )
             }
-        };
-
-        self.map_dma(ptr, size)
+        }
     }
 
-    fn allocate_4kib<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        // todo test this
-        let ptr = if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
+    /// Allocate `size` bytes memory with 4 KiB page size on the host device. Returns pointer to allocated memory
+    pub fn allocate_4kib(size: usize) -> *mut libc::c_void {
+        if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses.
 
@@ -581,15 +569,25 @@ impl Vfio {
                     0,
                 )
             }
-        };
-
-        self.map_dma(ptr, size)
+        }
     }
 }
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        self.allocate_4kib(size)
+        let ptr = Self::allocate_4kib(size);
+
+        // let mut output_file = std::fs::OpenOptions::new()
+        //     .append(true)
+        //     .create(true)
+        //     .open("output.txt")?;
+        // let start = std::time::Instant::now();
+        let res = self.map_dma(ptr, size)?;
+        // let duration = start.elapsed();
+        // print!("{:?} -> ", duration.as_nanos());
+        // writeln!(output_file, "{:?}", duration.as_nanos())?;
+
+        Ok(res)
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {

@@ -29,16 +29,21 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let random = true;
     let write = true;
 
-    let mut operations = 512;
+    let mut operations = 16;
 
-    for _ in 0..11 {
-        let res = qd_1_singlethread_latency(nvme, write, random, operations + 1)?;
-        nvme = res.0;
-        let latencies = res.1;
+    // for _ in 0..11 {
+    //     let res = qd_1_singlethread_latency(nvme, write, random, operations + 1)?;
+    //     nvme = res.0;
+    //     let latencies = res.1;
 
-        write_nanos_to_file_2(latencies, write, operations)?;
-        operations *= 2;
-    }
+    //     write_nanos_to_file_2(latencies, write, operations)?;
+    //     operations *= 2;
+    // }
+
+    let res = qd_1_singlethread_latency(nvme, write, random, operations)?;
+    nvme = res.0;
+    let latencies = res.1;
+    write_nanos_to_file_2(latencies, write, operations)?;
 
     Ok(())
 }
@@ -49,7 +54,7 @@ fn qd_1_singlethread_latency(
     random: bool,
     operations: u32,
 ) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
-    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_2MIB)?;
+    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_4KIB)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;

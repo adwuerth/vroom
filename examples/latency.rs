@@ -37,10 +37,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut nvme = vroom::init(&pci_addr)?;
 
     let random = true;
-    let write = true;
+    let write = false;
 
-    let (nvme, mut latencies) = qd_1_singlethread_latency(nvme, write, true, duration)?;
+    let (nvme, mut latencies) = qd_1_singlethread_latency(nvme, write, random, duration)?;
 
+    // let (nvme, mut latencies) = qd_n_multithread(nvme, 1, 1, duration, random, write)?;
     // to_microseconds(&mut latencies);
 
     write_nanos_to_file(latencies, write)?;
@@ -133,7 +134,7 @@ fn qd_n_multithread_latency_nanos(
     duration: Duration,
     random: bool,
     write: bool,
-) -> Result<(NvmeDevice, Vec<f64>), Box<dyn Error>> {
+) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
     let nvme = Arc::new(Mutex::new(nvme));
@@ -155,7 +156,7 @@ fn qd_n_multithread_latency_nanos(
             let mut qpair = nvme
                 .lock()
                 .unwrap()
-                .create_io_queue_pair(QUEUE_LENGTH)
+                .create_io_queue_pair(queue_depth)
                 .unwrap();
 
             let bytes_mult = queue_depth;
@@ -164,12 +165,15 @@ fn qd_n_multithread_latency_nanos(
                 .collect::<Vec<_>>()[..];
             buffer[0..bytes_mult * bytes].copy_from_slice(rand_block);
 
-            let mut outstanding_ops = 0;
-            let mut total = std::time::Duration::ZERO;
+            let mut outstanding_ops: usize = 0;
             let start_time = Instant::now();
 
             while start_time.elapsed() < duration {
-                let lba = rng.gen_range(range.0..range.1);
+                let lba = if random {
+                    rng.gen_range(range.0..range.1)
+                } else {
+                    outstanding_ops as u64 % range.1
+                };
                 let before = Instant::now();
 
                 qpair.submit_io(
@@ -178,33 +182,30 @@ fn qd_n_multithread_latency_nanos(
                     write,
                 );
 
-                while qpair.quick_poll().is_some() {
-                    outstanding_ops -= 1;
-                    let latency = before.elapsed().as_secs_f64();
-                    latencies.lock().unwrap().push(latency);
-                }
+                outstanding_ops += 1;
 
                 if outstanding_ops == queue_depth {
-                    qpair.complete_io(1);
+                    while qpair.quick_poll().is_some() {
+                        outstanding_ops -= 1;
+                        let latency = before.elapsed().as_nanos();
+                        latencies.lock().unwrap().push(latency);
+                    }
+                }
+            }
+
+            while outstanding_ops > 0 {
+                if qpair.quick_poll().is_some() {
                     outstanding_ops -= 1;
-                    let latency = before.elapsed().as_secs_f64();
+                    let latency = Instant::now().elapsed().as_nanos();
+                    latencies.lock().unwrap().push(latency);
+                } else {
+                    qpair.complete_io(1).unwrap();
+                    outstanding_ops -= 1;
+                    let latency = Instant::now().elapsed().as_nanos();
                     latencies.lock().unwrap().push(latency);
                 }
-
-                outstanding_ops += 1;
-                if outstanding_ops > queue_depth {
-                    outstanding_ops = queue_depth;
-                }
             }
 
-            if outstanding_ops != 0 {
-                let before = Instant::now();
-                qpair.complete_io(outstanding_ops);
-                let latency = before.elapsed().as_secs_f64();
-                latencies.lock().unwrap().push(latency);
-            }
-
-            assert!(qpair.sub_queue.is_empty());
             nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
         });
         threads.push(handle);
@@ -215,6 +216,116 @@ fn qd_n_multithread_latency_nanos(
             .join()
             .expect("The thread creation or execution failed!");
     }
+
+    let latencies = Arc::try_unwrap(latencies)
+        .expect("Arc::try_unwrap failed, not the last reference.")
+        .into_inner()
+        .expect("Mutex::into_inner failed.");
+
+    match Arc::try_unwrap(nvme) {
+        Ok(mutex) => match mutex.into_inner() {
+            Ok(t) => Ok((t, latencies)),
+            Err(e) => Err(e.into()),
+        },
+        Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
+    }
+}
+
+fn qd_n_multithread(
+    nvme: NvmeDevice,
+    queue_depth: usize,
+    thread_count: u64,
+    duration: Duration,
+    random: bool,
+    write: bool,
+) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
+    let blocks = 8;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
+
+    let nvme = Arc::new(Mutex::new(nvme));
+    let mut threads = Vec::new();
+
+    let mut latencies: Arc<Mutex<Vec<u128>>> =
+        Arc::new(Mutex::new(Vec::<u128>::with_capacity(100_000_000)));
+
+    for _ in 0..thread_count {
+        let nvme = Arc::clone(&nvme);
+        let latencies = Arc::clone(&latencies);
+        let range = (0, ns_blocks);
+
+        let handle = thread::spawn(move || -> (u64, f64) {
+            let mut rng = rand::thread_rng();
+            let bytes = 512 * blocks as usize; // 4kib
+            let mut total = std::time::Duration::ZERO;
+            let mut buffer: Dma<u8> =
+                Dma::allocate_nvme(vroom::PAGESIZE_4KIB * queue_depth, &nvme.lock().unwrap())
+                    .unwrap();
+
+            let mut qpair = nvme
+                .lock()
+                .unwrap()
+                .create_io_queue_pair(QUEUE_LENGTH)
+                .unwrap();
+
+            let buffer_size = queue_depth * bytes;
+
+            let rand_block = &(0..buffer_size)
+                .map(|_| rand::random::<u8>())
+                .collect::<Vec<_>>()[..];
+            buffer[0..buffer_size].copy_from_slice(rand_block);
+
+            let mut outstanding_ops = 0;
+            let mut total_io_ops = 0;
+            while total < duration {
+                let lba = rng.gen_range(range.0..range.1);
+                let before = Instant::now();
+                while qpair.quick_poll().is_some() {
+                    outstanding_ops -= 1;
+                    total_io_ops += 1;
+                }
+                if outstanding_ops == queue_depth {
+                    qpair.complete_io(1);
+                    outstanding_ops -= 1;
+                    total_io_ops += 1;
+                }
+                qpair.submit_io(
+                    &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
+                    lba * blocks,
+                    write,
+                );
+                latencies.lock().unwrap().push(before.elapsed().as_nanos());
+                total += before.elapsed();
+                outstanding_ops += 1;
+            }
+
+            if outstanding_ops != 0 {
+                let before = Instant::now();
+                qpair.complete_io(outstanding_ops);
+                latencies.lock().unwrap().push(before.elapsed().as_nanos());
+                total += before.elapsed();
+            }
+            total_io_ops += outstanding_ops as u64;
+            assert!(qpair.sub_queue.is_empty());
+            nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
+
+            (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
+        });
+        threads.push(handle);
+    }
+
+    let total = threads.into_iter().fold((0, 0.), |acc, thread| {
+        let res = thread
+            .join()
+            .expect("The thread creation or execution failed!");
+        (acc.0 + res.0, acc.1 + res.1)
+    });
+
+    println!(
+        "n: {}, total {} iops: {:?}",
+        total.0,
+        if write { "write" } else { "read" },
+        total.1
+    );
 
     let latencies = Arc::try_unwrap(latencies)
         .expect("Arc::try_unwrap failed, not the last reference.")

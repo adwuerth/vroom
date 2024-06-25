@@ -2,7 +2,7 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::Dma;
-use vroom::HUGE_PAGE_SIZE;
+use vroom::{HUGE_PAGE_SIZE, PAGESIZE_4KIB};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -24,19 +24,19 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_4KIB, &nvme)?;
     buffer[..bytes.len()].copy_from_slice(bytes);
 
     // Write the bytes to the NVMe memory
     nvme.write(&buffer, lba)?;
 
-    // Empty the buffer
-    buffer[..bytes.len()].fill_with(Default::default);
+    // // Empty the buffer
+    // buffer[..bytes.len()].fill_with(Default::default);
 
-    // Read the written bytes
-    nvme.read(&buffer, lba)?;
-    let read_buf = &buffer[0..bytes.len()];
-    println!("read bytes: {:?}", read_buf);
-    println!("read string: {}", str::from_utf8(read_buf).unwrap());
+    // // Read the written bytes
+    // nvme.read(&buffer, lba)?;
+    // let read_buf = &buffer[0..bytes.len()];
+    // println!("read bytes: {:?}", read_buf);
+    // println!("read string: {}", str::from_utf8(read_buf).unwrap());
     Ok(())
 }
