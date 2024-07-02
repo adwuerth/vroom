@@ -85,7 +85,6 @@ impl Mmio {
 impl Allocating for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         let size = if size % memory::HUGE_PAGE_SIZE != 0 {
-            println!("does this get used?");
             ((size >> memory::HUGE_PAGE_BITS) + 1) << memory::HUGE_PAGE_BITS
         } else {
             size
@@ -107,7 +106,6 @@ impl Allocating for Mmio {
                         size,
                         libc::PROT_READ | libc::PROT_WRITE,
                         libc::MAP_SHARED | libc::MAP_HUGETLB,
-                        // libc::MAP_SHARED,
                         f.as_raw_fd(),
                         0,
                     )
@@ -116,7 +114,6 @@ impl Allocating for Mmio {
                     Err("failed to mmap huge page - are huge pages enabled and free?".into())
                 } else if unsafe { libc::mlock(ptr, size) } == 0 {
                     let memory = Dma {
-                        // virt: NonNull::new(ptr as *mut T).expect("oops"),
                         virt: ptr.cast::<T>(),
                         phys: Self::virt_to_phys(ptr as usize)?,
                         size,

@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use vroom::memory::*;
+use vroom::vfio::Vfio;
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -20,7 +21,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
-
+    Vfio::set_pagesize(PAGESIZE_2MIB);
     let mut nvme = vroom::init(&pci_addr)?;
 
     fs::remove_file("output.txt").ok();
@@ -31,7 +32,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .open("output.txt")?;
 
     // const ITERATIONS: u64 = 2 << 13;
-    const ITERATIONS: u64 = 2 << 9;
+    const ITERATIONS: u64 = 2 << 8;
 
     for _ in 0..ITERATIONS {
         // let start = std::time::Instant::now();

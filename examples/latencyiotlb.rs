@@ -29,7 +29,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let random = true;
     let write = true;
 
-    let mut operations = 16;
+    let mut operations = 10000;
 
     // for _ in 0..11 {
     //     let res = qd_1_singlethread_latency(nvme, write, random, operations + 1)?;
@@ -54,27 +54,39 @@ fn qd_1_singlethread_latency(
     random: bool,
     operations: u32,
 ) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
-    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_4KIB)?;
-
     let blocks = 8;
-    let bytes = 512 * blocks;
+    let bytes = 512 * blocks; // 4KiB
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
 
     let mut rng = rand::thread_rng();
 
     let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
-    buffer[..rand_block.len()].copy_from_slice(rand_block);
 
     let mut total = Duration::ZERO;
     let mut ios = 0;
     let mut lba = 0;
     let mut latencies = Vec::new();
 
-    for _ in 0..operations {
+    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_2MIB)?;
+
+    buffer[..rand_block.len()].copy_from_slice(rand_block);
+
+    for i in 0..operations {
         lba = if random {
             rng.gen_range(0..ns_blocks)
         } else {
             (lba + 1) % ns_blocks
+        };
+
+        let elapsed_alloc = if true {
+            let before_alloc = Instant::now();
+            let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_2MIB)?;
+            let elapsed_alloc = before_alloc.elapsed();
+
+            buffer[..rand_block.len()].copy_from_slice(rand_block);
+            elapsed_alloc
+        } else {
+            Duration::ZERO
         };
 
         let before = Instant::now();
@@ -83,7 +95,7 @@ fn qd_1_singlethread_latency(
         } else {
             nvme.read(&buffer.slice(0..bytes as usize), lba * blocks)?;
         }
-        let elapsed = before.elapsed();
+        let elapsed = before.elapsed() + elapsed_alloc;
         latencies.push(elapsed.as_nanos());
         total += elapsed;
         ios += 1;

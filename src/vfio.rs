@@ -2,7 +2,7 @@
 #![allow(clippy::must_use_candidate)]
 
 use crate::ioallocator::Allocating;
-use crate::HUGE_PAGE_SIZE;
+use crate::{HUGE_PAGE_SIZE, PAGESIZE_1GIB, PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::error::Error;
 use std::fs;
 use std::fs::{File, OpenOptions};
@@ -11,7 +11,7 @@ use std::os::raw::c_void;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use std::io::Write;
 
@@ -48,8 +48,8 @@ struct vfio_iommu_type1_dma_map {
 struct vfio_iommu_type1_dma_unmap {
     argsz: u32,
     flags: u32,
-    iova: *mut u8, /* IO virtual address */
-    size: usize,   /* Size of mapping (bytes) */
+    iova: *mut u8,
+    size: usize,
     data: *mut libc::c_void,
 }
 
@@ -121,6 +121,7 @@ pub(crate) const X86_VA_WIDTH: u8 = 47;
 lazy_static! {
     /// IOVA_WIDTH is usually greater or equals to 47, e.g. in VMs only 39
     static ref IOVA_WIDTH: AtomicU8 = AtomicU8::new(X86_VA_WIDTH);
+    static ref VFIO_PAGESIZE: AtomicUsize = AtomicUsize::new(PAGESIZE_2MIB);
 }
 
 /// Implementation of Linux VFIO framework for direct device access.
@@ -385,6 +386,8 @@ impl Vfio {
             .into());
         }
         let ptr = ptr as usize;
+
+        // a direct mapping of the user-space virtual address space and the io virtual address space is used => iova = vaddr
         let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
             argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
             vaddr: ptr as *mut u8,
@@ -392,10 +395,7 @@ impl Vfio {
             iova: ptr as *mut u8,
             flags: VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
         };
-        // println!(
-        //     "Mapping DMA memory at {:p} with size {} and iommu_dma_map at {:?}",
-        //     ptr as *mut T, size, iommu_dma_map
-        // );
+
         let ioctl_result =
             unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_MAP_DMA, &mut iommu_dma_map) };
         let iova = if ioctl_result == -1 {
@@ -419,16 +419,16 @@ impl Vfio {
 
     /// Maps a memory region for DMA.
     /// # Errors
-    pub fn unmap_dma(&self, ptr: *mut libc::c_void, size: usize) -> Result<(), Box<dyn Error>> {
-        let dma_unmap = vfio_iommu_type1_dma_unmap {
+    pub fn unmap_dma<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+        let mut dma_unmap = vfio_iommu_type1_dma_unmap {
             argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
-            iova: ptr.cast::<u8>(),
-            size,
+            iova: dma.phys as *mut u8,
+            size: dma.size,
             flags: 0,
             data: ptr::null_mut(),
         };
 
-        if unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_UNMAP_DMA, &dma_unmap) } < 0 {
+        if unsafe { libc::ioctl(self.container_fd, VFIO_IOMMU_UNMAP_DMA, &mut dma_unmap) } < 0 {
             return Err(format!(
                 "failed to unmap the DMA memory. Errno: {}",
                 std::io::Error::last_os_error()
@@ -571,21 +571,37 @@ impl Vfio {
             }
         }
     }
+
+    pub fn set_pagesize(size: usize) {
+        VFIO_PAGESIZE.store(size, Ordering::Relaxed);
+    }
+
+    pub fn allocate_with_pagesize(size: usize) -> *mut libc::c_void {
+        let page_size = VFIO_PAGESIZE.load(Ordering::Relaxed);
+
+        if page_size == PAGESIZE_4KIB {
+            Self::allocate_4kib(size)
+        } else if page_size == PAGESIZE_1GIB {
+            Self::allocate_1gib(size)
+        } else {
+            Self::allocate_2mib(size)
+        }
+    }
 }
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let ptr = Self::allocate_4kib(size);
+        let page_size = VFIO_PAGESIZE.load(Ordering::Relaxed);
 
-        // let mut output_file = std::fs::OpenOptions::new()
-        //     .append(true)
-        //     .create(true)
-        //     .open("output.txt")?;
-        // let start = std::time::Instant::now();
+        let ptr = if page_size == PAGESIZE_4KIB {
+            Self::allocate_4kib(size)
+        } else if page_size == PAGESIZE_1GIB {
+            Self::allocate_1gib(size)
+        } else {
+            Self::allocate_2mib(size)
+        };
+
         let res = self.map_dma(ptr, size)?;
-        // let duration = start.elapsed();
-        // print!("{:?} -> ", duration.as_nanos());
-        // writeln!(output_file, "{:?}", duration.as_nanos())?;
 
         Ok(res)
     }

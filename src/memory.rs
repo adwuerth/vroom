@@ -148,7 +148,6 @@ impl IndexMut<RangeFull> for Dma<u8> {
     }
 }
 
-/// Basically legacy code
 impl<T> Dma<T> {
     /// Allocates DMA Memory on a huge page using an `IOAllocator`
     /// # Arguments

@@ -2,7 +2,7 @@ use crate::cmd::NvmeCommand;
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::memory::{Dma, DmaSlice};
 use crate::queues::{NvmeCompQueue, NvmeCompletion, NvmeSubQueue, QUEUE_LENGTH};
-use crate::{NvmeNamespace, NvmeStats, HUGE_PAGE_SIZE, PAGESIZE_2MIB, PAGESIZE_4KIB};
+use crate::{HUGE_PAGE_SIZE, PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::error::Error;
 use std::hint::spin_loop;
@@ -239,6 +239,19 @@ pub struct NvmeDevice {
     pub allocator: IOAllocator,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct NvmeNamespace {
+    pub id: u32,
+    pub blocks: u64,
+    pub block_size: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NvmeStats {
+    pub completions: u64,
+    pub submissions: u64,
+}
+
 // TODO
 unsafe impl Send for NvmeDevice {}
 
@@ -253,6 +266,7 @@ impl NvmeDevice {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
+        // Map the device's resource0
         let (addr, len) = allocator.map_resource()?;
 
         let buffer: Dma<u8> = allocator.allocate(PAGESIZE_2MIB)?;
@@ -305,6 +319,7 @@ impl NvmeDevice {
         }
 
         // Configure Admin Queues
+        // Initialize the addresses of the completion/submission queues on the device
         dev.set_reg64(NvmeRegs64::ASQ as u32, dev.admin_sq.get_addr() as u64);
         dev.set_reg64(NvmeRegs64::ACQ as u32, dev.admin_cq.get_addr() as u64);
         dev.set_reg32(
@@ -327,7 +342,6 @@ impl NvmeDevice {
         dev.set_reg32(NvmeRegs32::CC as u32, cc);
 
         // Enable the controller
-        // println!("Enabling controller");
         let ctrl_config = dev.get_reg32(NvmeRegs32::CC as u32) | 1;
         dev.set_reg32(NvmeRegs32::CC as u32, ctrl_config);
 

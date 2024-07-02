@@ -48,13 +48,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Allocated manual memory at {:p}", ptr);
 
-    vfio.map_dma::<u8>(ptr, size)?;
+    let dma = vfio.map_dma::<u8>(ptr, size)?;
 
     println!("Mapped memory");
 
     let start_time = Instant::now();
 
-    vfio.unmap_dma(ptr, size)?;
+    vfio.unmap_dma(dma)?;
     println!("Unmapped memory");
     vfio.map_dma::<u8>(ptr, size)?;
     println!("Remapped memory");
