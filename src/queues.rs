@@ -71,7 +71,7 @@ impl NvmeSubQueue {
         }
     }
 
-    #[inline(always)]
+    // #[inline(always)]
     pub fn submit(&mut self, entry: NvmeCommand) -> usize {
         // println!("SUBMISSION ENTRY: {:?}", entry);
         self.commands[self.tail] = entry;
@@ -111,7 +111,7 @@ impl NvmeCompQueue {
         })
     }
 
-    #[inline(always)]
+    // #[inline(always)]
     pub fn complete(&mut self) -> Option<(usize, NvmeCompletion, usize)> {
         // println!("{:?}", self.commands);
         let entry = &self.commands[self.head];
@@ -129,7 +129,7 @@ impl NvmeCompQueue {
     }
 
     ///
-    #[inline(always)]
+    // #[inline(always)]
     pub fn complete_n(&mut self, commands: usize) -> (usize, NvmeCompletion, usize) {
         let prev = self.head;
         self.head += commands - 1;
@@ -142,7 +142,7 @@ impl NvmeCompQueue {
         (head, entry, prev)
     }
 
-    #[inline(always)]
+    // #[inline(always)]
     pub fn complete_spin(&mut self) -> (usize, NvmeCompletion, usize) {
         loop {
             if let Some(val) = self.complete() {

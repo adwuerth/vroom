@@ -1,14 +1,14 @@
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use std::error::Error;
-
-use libc::statvfs64;
 use vroom::memory::*;
+use vroom::vfio::Vfio;
 
 use std::fs::{self, File};
 use std::io::Write;
 
 use std::{env, process};
 use vroom::Allocating;
-use vroom::NvmeDevice;
 
 use rand::Rng;
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -23,21 +23,17 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    const PAGE_SIZE: usize = PAGESIZE_4KIB;
+
+    Vfio::set_pagesize(PAGE_SIZE);
     let mut nvme = vroom::init(&pci_addr)?;
 
-    fs::remove_file("output.txt").ok();
-    // let mut output_file = std::fs::OpenOptions::new()
-    //     .read(true)
-    //     .write(true)
-    //     .create(true)
-    //     .open("output.txt")?;
-
     // const ITERATIONS: u64 = 2 << 13;
-    const ITERATIONS: u64 = 2 << 6;
+    const ITERATIONS: u64 = 2 << 5;
 
     // let buffer = nvme.allocate::<u8>(PAGESIZE_2MIB)?;
 
-    let random = true;
+    let random = false;
 
     let mut latencies = Vec::new();
     let mut lba = 0;
@@ -47,33 +43,43 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut rng = rand::thread_rng();
 
     for _ in 0..ITERATIONS {
-        lba = if random {
-            rng.gen_range(0..ns_blocks)
-        } else {
-            (lba + 1) % ns_blocks
-        };
-
         let mut total = 0;
 
-        let start = std::time::Instant::now();
-        let buffer = nvme.allocate::<u8>(PAGESIZE_2MIB)?;
-        let duration = start.elapsed();
         //let mut total = duration.as_nanos();
 
         // println!("{:?}", duration.as_nanos());
         // writeln!(output_file, "{:?}", duration.as_nanos())?;
+        let mut buffers = vec![];
+        if PAGE_SIZE == PAGESIZE_2MIB {
+            let buffer = nvme.allocate::<u8>(PAGESIZE_2MIB)?;
+            for b in 0..512 {
+                let slice = buffer.slice(PAGESIZE_4KIB * b..PAGESIZE_4KIB * (b + 1));
+                buffers.push(slice);
+            }
+        } else {
+            for _b in 0..512 {
+                let buffer = nvme.allocate::<u8>(PAGESIZE_4KIB)?;
+                buffers.push(buffer);
+            }
+        }
 
-        for b in 0..512 {
-            let slice = &buffer.slice(PAGESIZE_4KIB * b..PAGESIZE_4KIB * (b + 1));
+        // buffers.shuffle(&mut rng);
 
+        for buffer in buffers {
+            lba = if random {
+                rng.gen_range(0..ns_blocks)
+            } else {
+                (lba + 1) % ns_blocks
+            };
+
+            lba = 0;
             let start = std::time::Instant::now();
-            nvme.read(slice, lba)?;
+            nvme.read(&buffer, lba)?;
             let duration = start.elapsed();
             total += duration.as_nanos();
 
-            if b != 0 {
-                latencies.push(total);
-            }
+            latencies.push(total);
+
             total = 0;
         }
     }

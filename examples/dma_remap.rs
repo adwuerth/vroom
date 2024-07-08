@@ -1,13 +1,11 @@
 use std::error::Error;
 use std::time::Instant;
 
-use vroom::ioallocator::IOAllocator;
 use vroom::memory::*;
 use vroom::vfio::Vfio;
 
 use std::{env, process};
 use vroom::Allocating;
-use vroom::NvmeDevice;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();

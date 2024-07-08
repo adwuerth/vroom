@@ -177,18 +177,36 @@ impl NvmeQueuePair {
             }
             self.sub_queue.head = c_entry.sq_head as usize;
             let status = c_entry.status >> 1;
+            let comp_status = c_entry.status;
             if status != 0 {
                 eprintln!(
-                    "QUICK_POLL Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}",
+                    "QUICK_POLL Status: 0x{:x}, Status Code 0x{:x}, Status Code Type: 0x{:x}, ---------------> {}",
                     status,
                     status & 0xFF,
-                    (status >> 8) & 0x7
+                    (status >> 8) & 0x7,
+                    Self::u16_to_variable_bit_chunks(comp_status, &vec![1,1,2,3,8,1])
                 );
                 eprintln!("{c_entry:?}");
             }
             return Some(());
         }
         None
+    }
+
+    fn u16_to_variable_bit_chunks(n: u16, chunk_sizes: &Vec<usize>) -> String {
+        let binary_string = format!("{n:016b}");
+        let mut chunks = Vec::new();
+        let mut pos = 0;
+        for &size in chunk_sizes {
+            let end = if pos + size > 16 { 16 } else { pos + size };
+            let chunk: String = binary_string[pos..end].to_string();
+            chunks.push(chunk);
+            pos = end;
+            if pos >= 16 {
+                break;
+            }
+        }
+        chunks.join(" ")
     }
 
     ///

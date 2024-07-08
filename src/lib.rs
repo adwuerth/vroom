@@ -18,11 +18,14 @@ pub mod vfio;
 #[allow(dead_code, clippy::identity_op)]
 mod vfio_constants;
 
+mod vfio_structs;
+
 pub use memory::PAGESIZE_1GIB;
 pub use memory::PAGESIZE_2MIB;
 pub use memory::PAGESIZE_4KIB;
 
 pub use ioallocator::Allocating;
+pub use ioallocator::IOAllocator;
 
 pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};

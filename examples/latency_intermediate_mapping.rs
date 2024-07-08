@@ -1,17 +1,11 @@
-use csv::Writer;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 use rand::Rng;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::{env, process, thread, vec};
+use std::time::Instant;
+use std::{env, process, vec};
 use vroom::vfio::Vfio;
 use vroom::{memory::*, Allocating};
-use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();

@@ -5,7 +5,7 @@ use vroom::ioallocator::IOAllocator;
 use vroom::vfio::Vfio;
 use vroom::{memory::*, Allocating};
 
-use std::fs::{self, File};
+use std::fs::{self};
 use std::io::Write;
 
 use std::{env, process};
@@ -22,7 +22,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
     Vfio::set_pagesize(PAGESIZE_2MIB);
-    let mut nvme = vroom::init(&pci_addr)?;
+    let nvme = vroom::init(&pci_addr)?;
 
     let allocator = &nvme.allocator;
 
@@ -42,9 +42,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const ITERATIONS: u32 = 2 << 7;
     const ALLOC_SIZE: usize = PAGESIZE_2MIB;
 
-    for i in 0..ITERATIONS {
+    for _ in 0..ITERATIONS {
         let start_time = std::time::Instant::now();
-        let dma = mmio.allocate::<u8>(ALLOC_SIZE)?;
+        let _dma = mmio.allocate::<u8>(ALLOC_SIZE)?;
         let elapsed = start_time.elapsed();
         writeln!(allocate_output, "{:?}", elapsed.as_nanos()).unwrap();
     }

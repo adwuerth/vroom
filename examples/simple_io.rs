@@ -2,7 +2,7 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::Dma;
-use vroom::{HUGE_PAGE_SIZE, PAGESIZE_4KIB};
+use vroom::PAGESIZE_4KIB;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -30,13 +30,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // Write the bytes to the NVMe memory
     nvme.write(&buffer, lba)?;
 
-    // // Empty the buffer
-    // buffer[..bytes.len()].fill_with(Default::default);
+    // Empty the buffer
+    buffer[..bytes.len()].fill_with(Default::default);
 
-    // // Read the written bytes
-    // nvme.read(&buffer, lba)?;
-    // let read_buf = &buffer[0..bytes.len()];
-    // println!("read bytes: {:?}", read_buf);
-    // println!("read string: {}", str::from_utf8(read_buf).unwrap());
+    // Read the written bytes
+    nvme.read(&buffer, lba)?;
+    let read_buf = &buffer[0..bytes.len()];
+    println!("read bytes: {:?}", read_buf);
+    println!("read string: {}", str::from_utf8(read_buf).unwrap());
     Ok(())
 }
