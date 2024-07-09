@@ -27,7 +27,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let allocator = &nvme.allocator;
 
-    let vfio = match allocator {
+    let vfio = match allocator.as_ref() {
         IOAllocator::VfioAllocator(vfio) => vfio,
         IOAllocator::MmioAllocator(_) => {
             panic!("")

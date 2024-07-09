@@ -8,10 +8,12 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
 
+use std::io::Write;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::time::Instant;
 
 #[allow(clippy::wildcard_imports)]
 use crate::vfio_constants::*;
@@ -687,7 +689,15 @@ impl Allocating for Vfio {
             Self::allocate_2mib(size)
         };
 
+        let start = Instant::now();
         let res = self.map_dma(ptr, size)?;
+        let elapsed = start.elapsed();
+        let map_output = "outputmap.txt";
+        let mut map_output = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(map_output)?;
+        writeln!(map_output, "{:?}", elapsed.as_nanos()).unwrap();
 
         Ok(res)
     }

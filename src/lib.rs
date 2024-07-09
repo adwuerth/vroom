@@ -55,7 +55,8 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
         return Err(format!("device {pci_addr} is not a block device").into());
     }
 
-    let mut nvme = NvmeDevice::init(pci_addr)?;
+    let allocator = IOAllocator::init(pci_addr)?;
+    let mut nvme = NvmeDevice::init(pci_addr, Box::new(allocator))?;
     nvme.identify_controller()?;
     let ns = nvme.identify_namespace_list(0);
     for n in ns {

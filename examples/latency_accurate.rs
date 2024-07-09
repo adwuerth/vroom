@@ -2,6 +2,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use rand::Rng;
 use std::error::Error;
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
@@ -19,48 +20,47 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
-
+    let map_output = "outputmap.txt";
+    fs::remove_file(map_output).ok();
+    let mut map_output = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(map_output)?;
     let mut nvme = vroom::init(&pci_addr)?;
 
     // CONFIG
-    let random = false;
+    // let random = false;
     let write = false;
     const BUFFER_MULT: usize = 512;
     //CURRENTLY ONLY SUPPORTS 4KIB
     const DMA_SIZE: usize = PAGESIZE_4KIB;
-    const PAGE_SIZE: usize = PAGESIZE_4KIB;
+    const PAGE_SIZE: usize = PAGESIZE_2MIB;
     const ALWAYS_SAME_DMA: bool = false;
     const SKIP_LATENCIES: usize = 0;
-    const THRESHOLD: u128 = 7500 * 1000000;
-    const SHUFFLE_HALFWAY: bool = true;
-    const SHUFFLE_FIRST: bool = true;
 
     Vfio::set_pagesize(PAGE_SIZE);
     let mut latencies: Vec<u128> = vec![];
 
     let blocks = 8;
     // let bytes = 512 * blocks;
-    // let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
 
-    let mut rng = rand::thread_rng();
+    // let mut rng = rand::thread_rng();
 
-    let mut lba = 0;
-
-    let vfio = {
-        match nvme.allocator {
-            vroom::ioallocator::IOAllocator::MmioAllocator(_) => panic!(""),
-            vroom::ioallocator::IOAllocator::VfioAllocator(ref vfio) => vfio,
-        }
-    };
+    let lba = 0;
 
     for _ in 0..BUFFER_MULT {
-        let ptr = Vfio::allocate_with_pagesize(PAGESIZE_2MIB);
-        let dma = vfio.map_dma::<u8>(ptr, PAGESIZE_2MIB)?;
-        lba += 1;
+        let dma = nvme.allocate::<u8>(PAGESIZE_2MIB)?;
+
         for i in 0..512 {
+            let lba = (lba + 1) % ns_blocks;
             let dma_slice = &dma.slice(i * PAGESIZE_4KIB..(i + 1) * PAGESIZE_4KIB);
 
+            let start = Instant::now();
             nvme.read(dma_slice, lba)?;
+            let duration = start.elapsed().as_nanos();
+            latencies.push(duration);
         }
     }
 

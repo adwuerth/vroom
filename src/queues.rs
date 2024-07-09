@@ -4,6 +4,7 @@ use crate::memory::Dma;
 use crate::PAGESIZE_2MIB;
 use std::error::Error;
 use std::hint::spin_loop;
+use std::{array, ptr};
 
 /// `NVMe` spec 4.6
 /// Completion queue entry
@@ -31,7 +32,8 @@ pub const QUEUE_LENGTH: usize = 1024;
 /// Submission queue
 pub struct NvmeSubQueue {
     // TODO: switch to mempool for larger queue
-    commands: Dma<[NvmeCommand; QUEUE_LENGTH]>,
+    // commands: Dma<[NvmeCommand; QUEUE_LENGTH]>,
+    commands: Dma<u8>,
     pub head: usize,
     pub tail: usize,
     len: usize,
@@ -74,7 +76,11 @@ impl NvmeSubQueue {
     // #[inline(always)]
     pub fn submit(&mut self, entry: NvmeCommand) -> usize {
         // println!("SUBMISSION ENTRY: {:?}", entry);
-        self.commands[self.tail] = entry;
+        // self.commands[self.tail] = entry;
+
+        let ptr = self.commands.virt;
+        let array_ptr = ptr.cast::<[NvmeCommand; QUEUE_LENGTH]>();
+        (unsafe { &mut *array_ptr })[self.tail] = entry;
 
         self.tail = (self.tail + 1) % self.len;
         self.tail
