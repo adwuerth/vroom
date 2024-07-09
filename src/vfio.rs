@@ -689,15 +689,15 @@ impl Allocating for Vfio {
             Self::allocate_2mib(size)
         };
 
-        let start = Instant::now();
+        //let start = Instant::now();
         let res = self.map_dma(ptr, size)?;
-        let elapsed = start.elapsed();
-        let map_output = "outputmap.txt";
-        let mut map_output = std::fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .open(map_output)?;
-        writeln!(map_output, "{:?}", elapsed.as_nanos()).unwrap();
+        //let elapsed = start.elapsed();
+        //let map_output = "outputmap.txt";
+        //let mut map_output = std::fs::OpenOptions::new()
+        //    .read(true)
+        //    .append(true)
+        //    .open(map_output)?;
+        //writeln!(map_output, "{:?}", elapsed.as_nanos()).unwrap();
 
         Ok(res)
     }
