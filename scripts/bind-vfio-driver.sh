@@ -24,6 +24,7 @@ else
   exit 1
 fi
 
+modprobe vfio-pci
 nvme_vd="$(cat /sys/bus/pci/devices/$nvme/vendor) $(cat /sys/bus/pci/devices/$nvme/device)"
 # echo "$nvme_vd" > "/sys/bus/pci/drivers/vfio-pci/remove_id"
 # echo 1 > "/sys/bus/pci/devices/$nvme/remove"

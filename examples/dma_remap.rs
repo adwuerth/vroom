@@ -52,7 +52,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let start_time = Instant::now();
 
-    vfio.unmap_dma(dma)?;
+    vfio.unmap_dma(&dma)?;
     println!("Unmapped memory");
     vfio.map_dma::<u8>(ptr, size)?;
     println!("Remapped memory");

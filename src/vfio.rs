@@ -288,13 +288,16 @@ impl Vfio {
             "failed to attach iommufd to cdev"
         )?;
 
-        Ok(Self {
+        let vfio = Self {
             pci_addr: pci_addr.to_string(),
             device_fd: cdev_fd,
             container_fd: -1,
             ioas_id: alloc_data.out_ioas_id,
             iommufd,
-        })
+        };
+
+        vfio.enable_dma()?;
+        Ok(vfio)
     }
 
     fn check_intel_iommu(pci_addr: &str) {
@@ -446,8 +449,6 @@ impl Vfio {
             return self.map_dma_cdev(ptr, size);
         }
 
-        let ptr = ptr as usize;
-
         // a direct mapping of the user-space virtual address space and the io virtual address space is used => iova = vaddr
         let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
             argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
@@ -467,7 +468,7 @@ impl Vfio {
         let iova = iommu_dma_map.iova as usize;
 
         let memory = Dma {
-            virt: ptr as *mut T,
+            virt: ptr.cast::<T>(),
             phys: iova,
             size,
         };
@@ -480,14 +481,24 @@ impl Vfio {
         ptr: *mut libc::c_void,
         size: usize,
     ) -> Result<Dma<T>, Box<dyn Error>> {
+        println!("mapping DMA with cdev");
+        // let mut map = iommu_ioas_map {
+        //     size: mem::size_of::<iommu_ioas_map>() as u32,
+        //     flags: IOMMU_IOAS_MAP_FIXED_IOVA | IOMMU_IOAS_MAP_WRITEABLE | IOMMU_IOAS_MAP_READABLE,
+        //     ioas_id: self.ioas_id,
+        //     __reserved: 0,
+        //     user_va: ptr as u64,
+        //     length: size as u64,
+        //     iova: ptr as u64,
+        // };
         let mut map = iommu_ioas_map {
             size: mem::size_of::<iommu_ioas_map>() as u32,
-            flags: 0,
+            flags: IOMMU_IOAS_MAP_WRITEABLE | IOMMU_IOAS_MAP_READABLE,
             ioas_id: self.ioas_id,
             __reserved: 0,
             user_va: ptr as u64,
             length: size as u64,
-            iova: ptr as u64,
+            iova: 0,
         };
 
         ioctl!(
@@ -506,7 +517,7 @@ impl Vfio {
 
     /// Maps a memory region for DMA.
     /// # Errors
-    pub fn unmap_dma<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+    pub fn unmap_dma<T>(&self, dma: &Dma<T>) -> Result<(), Box<dyn Error>> {
         let mut dma_unmap = vfio_iommu_type1_dma_unmap {
             argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
             iova: dma.phys as *mut u8,
@@ -660,7 +671,7 @@ impl Vfio {
     }
 
     pub fn set_pagesize(size: usize) {
-        println!("Setting page size to: {}", size);
+        println!("Setting page size to: {size}");
         VFIO_PAGESIZE.store(size, Ordering::Relaxed);
     }
 
@@ -689,15 +700,7 @@ impl Allocating for Vfio {
             Self::allocate_2mib(size)
         };
 
-        let start = Instant::now();
         let res = self.map_dma(ptr, size)?;
-        let elapsed = start.elapsed();
-        let map_output = "outputmap.txt";
-        let mut map_output = std::fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .open(map_output)?;
-        writeln!(map_output, "{:?}", elapsed.as_nanos()).unwrap();
 
         Ok(res)
     }
@@ -705,4 +708,20 @@ impl Allocating for Vfio {
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         self.map_resource_index(VFIO_PCI_BAR0_REGION_INDEX)
     }
+
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+        self.unmap_dma(&dma)?;
+        // todo only 4kib pages work atm
+        match unsafe { libc::munmap(dma.virt.cast::<libc::c_void>(), dma.size) } {
+            0 => {
+                println!("deallocated memory");
+                Ok(())
+            }
+            _ => Err("failed to munmap memory".into()),
+        }
+    }
 }
+
+struct VfioGroupMapping {}
+
+struct VfioCDevMapping {}

@@ -7,6 +7,9 @@ pub trait Allocating {
     /// Allocate Dma<T> with size
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>>;
 
+    /// Deallocate Dma<T>
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>>;
+
     /// Map Resource/Region
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>>;
 }
@@ -38,6 +41,13 @@ impl Allocating for IOAllocator {
         match self {
             Self::MmioAllocator(mmio) => mmio.allocate(size),
             Self::VfioAllocator(vfio) => vfio.allocate(size),
+        }
+    }
+
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::MmioAllocator(mmio) => mmio.deallocate(dma),
+            Self::VfioAllocator(vfio) => vfio.deallocate(dma),
         }
     }
 

@@ -2,7 +2,8 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::Dma;
-use vroom::PAGESIZE_4KIB;
+use vroom::vfio::Vfio;
+use vroom::{Allocating, PAGESIZE_1GIB, PAGESIZE_2MIB, PAGESIZE_4KIB};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -21,7 +22,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize NVMe Driver
     let mut nvme = vroom::init(&pci_addr)?;
-
+    Vfio::set_pagesize(PAGESIZE_2MIB);
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
     let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_4KIB, &nvme)?;
@@ -38,5 +39,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let read_buf = &buffer[0..bytes.len()];
     println!("read bytes: {:?}", read_buf);
     println!("read string: {}", str::from_utf8(read_buf).unwrap());
+    nvme.deallocate(buffer)?;
     Ok(())
 }

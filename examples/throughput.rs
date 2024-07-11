@@ -30,7 +30,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let duration = duration.unwrap();
 
-    Vfio::set_pagesize(PAGESIZE_2MIB);
+    Vfio::set_pagesize(PAGESIZE_4KIB);
 
     let mut nvme = vroom::init(&pci_addr)?;
 
@@ -39,7 +39,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 1024, 1, duration, random, write)?;
+    let nvme = test_throughput_random(nvme, 1, 1, duration, random, write)?;
 
     Ok(())
 }

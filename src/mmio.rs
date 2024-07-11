@@ -163,4 +163,8 @@ impl Allocating for Mmio {
             Ok((ptr, len))
         }
     }
+
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+        todo!()
+    }
 }

@@ -893,6 +893,10 @@ impl Allocating for NvmeDevice {
         self.allocator.allocate(size)
     }
 
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+        self.allocator.deallocate(dma)
+    }
+
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         self.allocator.map_resource()
     }

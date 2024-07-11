@@ -155,7 +155,7 @@ fn free_dma_vec(
 
     for dma in dma_vec {
         let start_time = std::time::Instant::now();
-        vfio.unmap_dma(dma)?;
+        vfio.unmap_dma(&dma)?;
         let elapsed = start_time.elapsed();
         writeln!(unmap_output, "{:?}", elapsed.as_nanos()).unwrap();
     }
