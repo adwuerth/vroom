@@ -13,6 +13,8 @@ pub const PAGESIZE_2MIB: usize = 1 << SHIFT_2MIB;
 pub const SHIFT_1GIB: u32 = 30;
 pub const PAGESIZE_1GIB: usize = 1 << SHIFT_1GIB;
 
+pub const DEFAULT_PAGE_SIZE: Pagesize = Pagesize::Page2M;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pagesize {
     Page4K,

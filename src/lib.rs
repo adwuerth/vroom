@@ -20,6 +20,8 @@ mod vfio_constants;
 
 mod vfio_structs;
 
+use memory::Pagesize;
+use memory::DEFAULT_PAGE_SIZE;
 pub use memory::PAGESIZE_1GIB;
 pub use memory::PAGESIZE_2MIB;
 pub use memory::PAGESIZE_4KIB;
@@ -40,6 +42,21 @@ use std::error::Error;
 /// # Errors
 /// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
 pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
+    init_with_page_size(pci_addr, DEFAULT_PAGE_SIZE)
+}
+
+/// initialise driver
+/// # Arguments
+/// * `pci_addr` - pci address of the device
+/// * `page_size` - page size for VFIO, MMIO only works with 2mib
+/// # Panics
+/// Panics if the device cant be found
+/// # Errors
+/// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
+pub fn init_with_page_size(
+    pci_addr: &str,
+    page_size: Pagesize,
+) -> Result<NvmeDevice, Box<dyn Error>> {
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
     let mut config_file = pci_open_resource_ro(pci_addr, "config").expect("wrong pci address");
@@ -54,7 +71,7 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
         return Err(format!("device {pci_addr} is not a block device").into());
     }
 
-    let allocator = IOAllocator::init(pci_addr)?;
+    let allocator = IOAllocator::init_with_page_size(pci_addr, page_size)?;
     let mut nvme = NvmeDevice::init(pci_addr, Box::new(allocator))?;
     nvme.identify_controller()?;
     let ns = nvme.identify_namespace_list(0);
