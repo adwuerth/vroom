@@ -3,7 +3,7 @@ use std::error::Error;
 use std::process;
 use std::time::{Duration, Instant};
 use vroom::memory::{Dma, DmaSlice};
-use vroom::HUGE_PAGE_SIZE;
+use vroom::PAGESIZE_2MIB;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 mod common;
@@ -40,7 +40,7 @@ fn qd1(
     random: bool,
     time: Duration,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
-    let mut buffer: Dma<u8> = allocate_dma_buffer(&nvme, HUGE_PAGE_SIZE);
+    let mut buffer: Dma<u8> = allocate_dma_buffer(&nvme, PAGESIZE_2MIB);
 
     let blocks = 8;
     let bytes = 512 * blocks;

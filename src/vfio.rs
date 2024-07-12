@@ -2,18 +2,16 @@
 #![allow(clippy::must_use_candidate)]
 
 use crate::ioallocator::Allocating;
-use crate::{HUGE_PAGE_SIZE, PAGESIZE_1GIB, PAGESIZE_2MIB, PAGESIZE_4KIB};
+use crate::PAGESIZE_2MIB;
 use std::error::Error;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
 
-use std::io::Write;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::time::Instant;
 
 #[allow(clippy::wildcard_imports)]
 use crate::vfio_constants::*;
@@ -23,7 +21,7 @@ use crate::vfio_structs::*;
 use lazy_static::lazy_static;
 use libc::ioctl;
 
-use crate::memory::Dma;
+use crate::memory::{Dma, Pagesize};
 use crate::pci::{pci_open_resource_ro, read_hex, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -40,7 +38,6 @@ pub(crate) const USE_CDEV: bool = false;
 lazy_static! {
     /// IOVA_WIDTH is usually greater or equals to 47, e.g. in VMs only 39
     static ref IOVA_WIDTH: AtomicU8 = AtomicU8::new(X86_VA_WIDTH);
-    static ref VFIO_PAGESIZE: AtomicUsize = AtomicUsize::new(PAGESIZE_2MIB);
     static ref IOVA_CTR: AtomicUsize = AtomicUsize::new(0);
 }
 
@@ -71,12 +68,14 @@ macro_rules! ioctl {
     }};
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
     container_fd: RawFd,
     ioas_id: u32,
     iommufd: i32,
+    page_size: Pagesize,
 }
 
 /// Implementation of Linux VFIO framework for direct device access.
@@ -86,8 +85,17 @@ impl Vfio {
     /// # Errors
     #[allow(clippy::too_many_lines)]
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
-        if USE_CDEV {
-            return Self::init_cdev(pci_addr);
+        Self::init_with_args(pci_addr, Pagesize::Page2M, false)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn init_with_args(
+        pci_addr: &str,
+        page_size: Pagesize,
+        use_cdev: bool,
+    ) -> Result<Self, Box<dyn Error>> {
+        if use_cdev {
+            return Self::init_cdev(pci_addr, page_size);
         }
 
         let group_file: File;
@@ -226,6 +234,7 @@ impl Vfio {
             container_fd,
             ioas_id: 0,
             iommufd: 0,
+            page_size,
         };
 
         vfio.enable_dma()?;
@@ -233,7 +242,7 @@ impl Vfio {
         Ok(vfio)
     }
 
-    fn init_cdev(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
+    fn init_cdev(pci_addr: &str, page_size: Pagesize) -> Result<Self, Box<dyn Error>> {
         let iommufd = OpenOptions::new()
             .read(true)
             .write(true)
@@ -294,6 +303,7 @@ impl Vfio {
             container_fd: -1,
             ioas_id: alloc_data.out_ioas_id,
             iommufd,
+            page_size,
         };
 
         vfio.enable_dma()?;
@@ -589,7 +599,7 @@ impl Vfio {
             let addr = unsafe {
                 libc::mmap(
                     ptr::null_mut(),
-                    size + HUGE_PAGE_SIZE,
+                    size + PAGESIZE_2MIB,
                     libc::PROT_READ | libc::PROT_WRITE,
                     libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
                     -1,
@@ -598,15 +608,15 @@ impl Vfio {
             };
 
             // calculate the huge page size aligned address by rounding up
-            let aligned_addr = ((addr as isize + HUGE_PAGE_SIZE as isize - 1)
-                & -(HUGE_PAGE_SIZE as isize)) as *mut libc::c_void;
+            let aligned_addr = ((addr as isize + PAGESIZE_2MIB as isize - 1)
+                & -(PAGESIZE_2MIB as isize)) as *mut libc::c_void;
 
             let free_chunk_size = aligned_addr as usize - addr as usize;
 
             // free unneeded pages (i.e. all chunks of the additionally mapped huge page)
             unsafe {
                 libc::munmap(addr, free_chunk_size);
-                libc::munmap(aligned_addr.add(size), HUGE_PAGE_SIZE - free_chunk_size);
+                libc::munmap(aligned_addr.add(size), PAGESIZE_2MIB - free_chunk_size);
             }
 
             // finally map huge pages at the huge page size aligned 32-bit address
@@ -670,39 +680,24 @@ impl Vfio {
         }
     }
 
-    pub fn set_pagesize(size: usize) {
-        println!("Setting page size to: {size}");
-        VFIO_PAGESIZE.store(size, Ordering::Relaxed);
+    pub fn allocate_with_pagesize(&self, size: usize) -> *mut libc::c_void {
+        let page_size = &self.page_size;
+        match page_size {
+            Pagesize::Page4K => Self::allocate_4kib(size),
+            Pagesize::Page1G => Self::allocate_1gib(size),
+            Pagesize::Page2M => Self::allocate_2mib(size),
+        }
     }
 
-    pub fn allocate_with_pagesize(size: usize) -> *mut libc::c_void {
-        let page_size = VFIO_PAGESIZE.load(Ordering::Relaxed);
-
-        if page_size == PAGESIZE_4KIB {
-            Self::allocate_4kib(size)
-        } else if page_size == PAGESIZE_1GIB {
-            Self::allocate_1gib(size)
-        } else {
-            Self::allocate_2mib(size)
-        }
+    pub fn set_page_size(&mut self, page_size: Pagesize) {
+        self.page_size = page_size;
     }
 }
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let page_size = VFIO_PAGESIZE.load(Ordering::Relaxed);
-
-        let ptr = if page_size == PAGESIZE_4KIB {
-            Self::allocate_4kib(size)
-        } else if page_size == PAGESIZE_1GIB {
-            Self::allocate_1gib(size)
-        } else {
-            Self::allocate_2mib(size)
-        };
-
-        let res = self.map_dma(ptr, size)?;
-
-        Ok(res)
+        let ptr = self.allocate_with_pagesize(size);
+        self.map_dma(ptr, size)
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
@@ -711,8 +706,10 @@ impl Allocating for Vfio {
 
     fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
         self.unmap_dma(&dma)?;
-        // todo only 4kib pages work atm
-        match unsafe { libc::munmap(dma.virt.cast::<libc::c_void>(), dma.size) } {
+
+        let size = self.page_size.shift_up(dma.size);
+
+        match unsafe { libc::munmap(dma.virt.cast::<libc::c_void>(), size) } {
             0 => {
                 println!("deallocated memory");
                 Ok(())

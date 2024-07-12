@@ -1,4 +1,4 @@
-use crate::memory::Dma;
+use crate::memory::{Dma, Pagesize};
 use crate::mmio::Mmio;
 use crate::vfio::Vfio;
 use std::error::Error;
@@ -33,6 +33,13 @@ impl IOAllocator {
             }
             Self::MmioAllocator(Mmio::init(pci_addr))
         })
+    }
+
+    pub fn set_page_size(&mut self, page_size: Pagesize) {
+        match self {
+            Self::VfioAllocator(vfio) => vfio.set_page_size(page_size),
+            _ => (),
+        }
     }
 }
 

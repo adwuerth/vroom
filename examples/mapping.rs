@@ -21,8 +21,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
-    Vfio::set_pagesize(PAGESIZE_2MIB);
+
     let mut nvme = vroom::init(&pci_addr)?;
+    nvme.set_page_size(Pagesize::Page2M);
 
     fs::remove_file("output.txt").ok();
     let mut output_file = std::fs::OpenOptions::new()

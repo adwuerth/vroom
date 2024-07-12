@@ -1,5 +1,5 @@
 use crate::ioallocator::Allocating;
-use crate::memory::Dma;
+use crate::memory::{Dma, Pagesize};
 use crate::pci::{
     read_io16, write_io16, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET, INTERRUPT_DISABLE,
 };
@@ -84,8 +84,8 @@ impl Mmio {
 
 impl Allocating for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let size = if size % memory::HUGE_PAGE_SIZE != 0 {
-            ((size >> memory::HUGE_PAGE_BITS) + 1) << memory::HUGE_PAGE_BITS
+        let size = if size % memory::PAGESIZE_2MIB != 0 {
+            ((size >> memory::SHIFT_2MIB) + 1) << memory::SHIFT_2MIB
         } else {
             size
         };

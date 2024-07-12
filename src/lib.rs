@@ -27,7 +27,6 @@ pub use memory::PAGESIZE_4KIB;
 pub use ioallocator::Allocating;
 pub use ioallocator::IOAllocator;
 
-pub use memory::HUGE_PAGE_SIZE;
 pub use nvme::{NvmeDevice, NvmeQueuePair};
 use pci::{pci_open_resource_ro, read_hex, read_io32};
 pub use queues::QUEUE_LENGTH;

@@ -33,9 +33,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     const PAGE_SIZE: usize = PAGESIZE_4KIB;
 
-    Vfio::set_pagesize(PAGE_SIZE);
-
     let mut nvme = vroom::init(&pci_addr)?;
+    nvme.set_page_size(Pagesize::Page4K);
 
     let random = true;
     let write = false;

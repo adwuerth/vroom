@@ -1,5 +1,5 @@
 use vroom::memory::Dma;
-use vroom::HUGE_PAGE_SIZE;
+use vroom::PAGESIZE_2MIB;
 
 mod common;
 use common::*;
@@ -13,7 +13,7 @@ pub fn simple_read_write() {
     let mut nvme = init_nvme(pci_addr);
 
     let bytes: &[u8] = b"hello world! vroom test bytes";
-    let mut buffer: Dma<u8> = allocate_dma_buffer(&nvme, HUGE_PAGE_SIZE);
+    let mut buffer: Dma<u8> = allocate_dma_buffer(&nvme, PAGESIZE_2MIB);
 
     buffer[..bytes.len()].copy_from_slice(bytes);
     nvme_write(&mut nvme, &buffer, lba);

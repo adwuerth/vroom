@@ -27,9 +27,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const BUFFER_SIZE: usize = PAGESIZE_2MIB * 64;
     const DMA_SIZE: usize = PAGESIZE_2MIB;
     const BUFFER_FRAG: usize = PAGESIZE_4KIB; // DO NOT CHANGE
-    const PAGE_SIZE: usize = PAGESIZE_2MIB;
+    const PAGE_SIZE: Pagesize = Pagesize::Page2M;
 
-    Vfio::set_pagesize(PAGE_SIZE);
+    nvme.set_page_size(PAGE_SIZE);
     let mut latencies: Vec<u128> = vec![];
 
     let blocks = 8;
@@ -100,14 +100,14 @@ fn write_nanos_to_file(
     latencies: Vec<u128>,
     write: bool,
     dma_size: usize,
-    page_size: usize,
+    page_size: Pagesize,
 ) -> Result<(), Box<dyn Error>> {
     const IOMMU: &str = "tn";
     let mut file = File::create(format!(
         "latency_intmap_{}_{}ds_{}ps_{IOMMU}.txt",
         if write { "write" } else { "read" },
         size_to_string(dma_size),
-        size_to_string(page_size),
+        page_size,
     ))?;
     for lat in latencies {
         writeln!(file, "{}", lat)?;

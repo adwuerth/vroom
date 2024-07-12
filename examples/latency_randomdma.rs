@@ -23,7 +23,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let mut nvme = vroom::init(&pci_addr)?;
 
-    Vfio::set_pagesize(PAGESIZE_4KIB);
+    nvme.set_page_size(Pagesize::Page2M);
 
     // CONFIG
     let random = false;

@@ -103,7 +103,7 @@ fn qd_n_multithread(
             let bytes = 512 * blocks as usize;
             let mut total = std::time::Duration::ZERO;
             let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
+                Dma::allocate_nvme(PAGESIZE_2MIB, &nvme.lock().unwrap()).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -200,7 +200,7 @@ fn qd_1_singlethread(
     random: bool,
     duration: Duration,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_2MIB, &nvme)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;

@@ -23,10 +23,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    const PAGE_SIZE: usize = PAGESIZE_4KIB;
-
-    Vfio::set_pagesize(PAGE_SIZE);
+    const PAGE_SIZE: Pagesize = Pagesize::Page2M;
     let mut nvme = vroom::init(&pci_addr)?;
+    nvme.set_page_size(PAGE_SIZE);
 
     // const ITERATIONS: u64 = 2 << 13;
     const ITERATIONS: u64 = 2 << 5;
@@ -50,7 +49,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         // println!("{:?}", duration.as_nanos());
         // writeln!(output_file, "{:?}", duration.as_nanos())?;
         let mut buffers = vec![];
-        if PAGE_SIZE == PAGESIZE_2MIB {
+        if PAGE_SIZE == Pagesize::Page2M {
             let buffer = nvme.allocate::<u8>(PAGESIZE_2MIB)?;
             for b in 0..512 {
                 let slice = buffer.slice(PAGESIZE_4KIB * b..PAGESIZE_4KIB * (b + 1));

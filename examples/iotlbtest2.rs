@@ -28,14 +28,14 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const BUFFER_MULT: usize = 512;
     //CURRENTLY ONLY SUPPORTS 4KIB
     const DMA_SIZE: usize = PAGESIZE_4KIB;
-    const PAGE_SIZE: usize = PAGESIZE_4KIB;
+    const PAGE_SIZE: Pagesize = Pagesize::Page4K;
     const ALWAYS_SAME_DMA: bool = false;
     const SKIP_LATENCIES: usize = 0;
     const THRESHOLD: u128 = 7500 * 1000000;
     const SHUFFLE_FIRST: bool = true;
     const DMA_THRESHOLD: usize = 64;
 
-    Vfio::set_pagesize(PAGE_SIZE);
+    nvme.set_page_size(PAGE_SIZE);
     let mut latencies: Vec<u128> = vec![];
     let mut latencies_in_iotlb: Vec<u128> = vec![];
 
@@ -146,7 +146,7 @@ fn write_nanos_to_file(
     latencies: Vec<u128>,
     write: bool,
     dma_size: usize,
-    page_size: usize,
+    page_size: Pagesize,
     buffer_mult: usize,
     second_run: bool,
     same: bool,
@@ -156,7 +156,7 @@ fn write_nanos_to_file(
         "latency_intmap_{}_{}ds_{}ps_{buffer_mult}_{IOMMU}_{}_{}.txt",
         if write { "write" } else { "read" },
         size_to_string(dma_size),
-        size_to_string(page_size),
+        page_size,
         if second_run { "second" } else { "first" },
         if same { "same" } else { "diff" }
     ))?;

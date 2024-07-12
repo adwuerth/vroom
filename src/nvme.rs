@@ -1,8 +1,8 @@
 use crate::cmd::NvmeCommand;
 use crate::ioallocator::{Allocating, IOAllocator};
-use crate::memory::{Dma, DmaSlice};
+use crate::memory::{Dma, DmaSlice, Pagesize};
 use crate::queues::{NvmeCompQueue, NvmeCompletion, NvmeSubQueue, QUEUE_LENGTH};
-use crate::{HUGE_PAGE_SIZE, PAGESIZE_2MIB, PAGESIZE_4KIB};
+use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::error::Error;
 use std::hint::spin_loop;
@@ -672,7 +672,7 @@ impl NvmeDevice {
         let block_size = 512;
         let q_id = 1;
 
-        for chunk in data.chunks(HUGE_PAGE_SIZE) {
+        for chunk in data.chunks(PAGESIZE_2MIB) {
             self.buffer[..chunk.len()].copy_from_slice(chunk);
             let tail = self.io_sq.tail;
 
@@ -714,7 +714,7 @@ impl NvmeDevice {
         let block_size = 512;
         let q_id = 1;
 
-        for chunk in data.chunks_mut(HUGE_PAGE_SIZE) {
+        for chunk in data.chunks_mut(PAGESIZE_2MIB) {
             let tail = self.io_sq.tail;
 
             let batch_len = std::cmp::min(batch_len, chunk.len() as u64 / block_size);
@@ -885,6 +885,10 @@ impl NvmeDevice {
         assert!(reg as usize <= self.len - 8, "memory access out of bounds");
 
         unsafe { std::ptr::read_volatile((self.addr as usize + reg as usize) as *mut u64) }
+    }
+
+    pub fn set_page_size(&mut self, page_size: Pagesize) {
+        self.allocator.set_page_size(page_size);
     }
 }
 

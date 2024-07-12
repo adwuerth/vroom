@@ -21,8 +21,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
-    Vfio::set_pagesize(PAGESIZE_2MIB);
-    let nvme = vroom::init(&pci_addr)?;
+
+    let mut nvme = vroom::init(&pci_addr)?;
+    nvme.set_page_size(Pagesize::Page2M);
 
     let allocator = &nvme.allocator;
 

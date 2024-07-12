@@ -53,7 +53,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const SHUFFLE_HALFWAY: bool = true;
     const SHUFFLE_FIRST: bool = true;
 
-    Vfio::set_pagesize(page_size);
+    nvme.set_page_size(Pagesize::Page2M);
 
     // let mut n = 4096 * 2 * 2 * 2 * 2 * 2;
     let mut n = 4;

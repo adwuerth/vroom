@@ -151,7 +151,7 @@ fn qd_n_multithread_latency_nanos(
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
             let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme.lock().unwrap()).unwrap();
+                Dma::allocate_nvme(PAGESIZE_2MIB, &nvme.lock().unwrap()).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -347,7 +347,7 @@ fn qd_1_singlethread_latency(
     random: bool,
     duration: Duration,
 ) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(HUGE_PAGE_SIZE, &nvme)?;
+    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_2MIB, &nvme)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;

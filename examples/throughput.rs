@@ -30,9 +30,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let duration = duration.unwrap();
 
-    Vfio::set_pagesize(PAGESIZE_4KIB);
-
     let mut nvme = vroom::init(&pci_addr)?;
+
+    nvme.set_page_size(Pagesize::Page4K);
 
     let random = false;
     let write = false;

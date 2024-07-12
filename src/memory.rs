@@ -1,16 +1,70 @@
 use std::error::Error;
+use std::fmt::Display;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
 use std::slice;
 
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::NvmeDevice;
 
-pub const HUGE_PAGE_BITS: u32 = 21;
-pub const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
+pub const SHIFT_4KIB: u32 = 12;
+pub const PAGESIZE_4KIB: usize = 1 << SHIFT_4KIB;
+pub const SHIFT_2MIB: u32 = 21;
+pub const PAGESIZE_2MIB: usize = 1 << SHIFT_2MIB;
+pub const SHIFT_1GIB: u32 = 30;
+pub const PAGESIZE_1GIB: usize = 1 << SHIFT_1GIB;
 
-pub const PAGESIZE_4KIB: usize = 1024 * 4;
-pub const PAGESIZE_2MIB: usize = 1024 * 1024 * 2;
-pub const PAGESIZE_1GIB: usize = 1024 * 1024 * 1024;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pagesize {
+    Page4K,
+    Page2M,
+    Page1G,
+}
+
+impl Pagesize {
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        match self {
+            Self::Page4K => PAGESIZE_4KIB,
+            Self::Page2M => PAGESIZE_2MIB,
+            Self::Page1G => PAGESIZE_1GIB,
+        }
+    }
+
+    #[must_use]
+    pub const fn shift(&self) -> u32 {
+        match self {
+            Self::Page4K => SHIFT_4KIB,
+            Self::Page2M => SHIFT_2MIB,
+            Self::Page1G => SHIFT_1GIB,
+        }
+    }
+
+    #[must_use]
+    pub const fn shift_up(&self, size: usize) -> usize {
+        ((size >> self.shift()) + 1) << self.shift()
+    }
+
+    #[must_use]
+    #[allow(clippy::match_same_arms)]
+    pub const fn from(size: usize) -> Self {
+        match size {
+            PAGESIZE_4KIB => Self::Page4K,
+            PAGESIZE_2MIB => Self::Page2M,
+            PAGESIZE_1GIB => Self::Page1G,
+            _ => Self::Page2M,
+        }
+    }
+}
+
+impl Display for Pagesize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Page4K => write!(f, "4KiB"),
+            Self::Page2M => write!(f, "2MiB"),
+            Self::Page1G => write!(f, "1GiB"),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Dma<T> {
