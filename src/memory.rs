@@ -43,6 +43,9 @@ impl Pagesize {
 
     #[must_use]
     pub const fn shift_up(&self, size: usize) -> usize {
+        if size % self.size() == 0 {
+            return size;
+        }
         ((size >> self.shift()) + 1) << self.shift()
     }
 

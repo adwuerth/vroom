@@ -28,10 +28,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let do_dealloc = match args.next() {
+        Some(arg) => arg == "dealloc",
+        None => false,
+    };
+
     let page_size = match page_size.as_str() {
-        "4k" => PAGESIZE_4KIB,
-        "2m" => PAGESIZE_2MIB,
-        "1g" => PAGESIZE_1GIB,
+        "4k" => Pagesize::Page4K,
+        "2m" => Pagesize::Page2M,
+        "1g" => Pagesize::Page1G,
         _ => {
             eprintln!("Invalid page size");
             process::exit(1);
@@ -53,7 +58,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const SHUFFLE_HALFWAY: bool = true;
     const SHUFFLE_FIRST: bool = true;
 
-    nvme.set_page_size(Pagesize::Page2M);
+    nvme.set_page_size(page_size.clone());
 
     // let mut n = 4096 * 2 * 2 * 2 * 2 * 2;
     let mut n = 4;
@@ -81,7 +86,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             previous_dmas.shuffle(&mut thread_rng());
         }
 
-        for dma in &previous_dmas {
+        for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
             } else {
@@ -90,9 +95,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
             let before = Instant::now();
             if write {
-                nvme.write(dma, lba * blocks)?;
+                nvme.write(previous_dma, lba * blocks)?;
             } else {
-                nvme.read(dma, lba * blocks)?;
+                nvme.read(previous_dma, lba * blocks)?;
             }
             let elapsed = before.elapsed();
 
@@ -107,7 +112,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
         let same_dma = &previous_dmas[0];
 
-        for dma in &previous_dmas {
+        for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
             } else {
@@ -119,52 +124,27 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 if ALWAYS_SAME_DMA {
                     nvme.write(same_dma, lba * blocks)?;
                 } else {
-                    nvme.write(dma, lba * blocks)?;
+                    nvme.write(previous_dma, lba * blocks)?;
                 }
             } else {
                 #[allow(clippy::collapsible_else_if)]
                 if ALWAYS_SAME_DMA {
                     nvme.read(same_dma, lba * blocks)?;
                 } else {
-                    nvme.read(dma, lba * blocks)?;
+                    nvme.read(previous_dma, lba * blocks)?;
                 }
             }
             let elapsed = before.elapsed();
             if elapsed.as_nanos() < THRESHOLD {
                 half2.push(elapsed.as_nanos());
             }
-
-            // lba = if random {
-            //     rng.gen_range(0..ns_blocks)
-            // } else {
-            //     (lba + 1) % ns_blocks
-            // };
-
-            // let before = Instant::now();
-            // if write {
-            //     if ALWAYS_SAME_DMA {
-            //         nvme.write(same_dma, lba * blocks)?;
-            //     } else {
-            //         nvme.write(dma, lba * blocks)?;
-            //     }
-            // } else {
-            //     if ALWAYS_SAME_DMA {
-            //         nvme.read(same_dma, lba * blocks)?;
-            //     } else {
-            //         nvme.read(dma, lba * blocks)?;
-            //     }
-            // }
-            // let elapsed = before.elapsed();
-            // if elapsed.as_nanos() < THRESHOLD {
-            //     latencies.push(elapsed.as_nanos());
-            // }
         }
 
         write_nanos_to_file(
             half1[SKIP_LATENCIES..].to_vec(),
             write,
             DMA_SIZE,
-            page_size,
+            &page_size,
             n,
             false,
             ALWAYS_SAME_DMA,
@@ -174,11 +154,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             half2[SKIP_LATENCIES..].to_vec(),
             write,
             DMA_SIZE,
-            page_size,
+            &page_size,
             n,
             true,
             ALWAYS_SAME_DMA,
         )?;
+
+        if do_dealloc {
+            nvme.deallocate(dma)?;
+        }
     }
     Ok(())
 }
@@ -187,7 +171,7 @@ fn write_nanos_to_file(
     latencies: Vec<u128>,
     write: bool,
     dma_size: usize,
-    page_size: usize,
+    page_size: &Pagesize,
     buffer_mult: usize,
     second_run: bool,
     same: bool,
@@ -197,7 +181,7 @@ fn write_nanos_to_file(
         "latency_intmap_{}_{}ds_{}ps_{buffer_mult}_{IOMMU}_{}_{}.txt",
         if write { "write" } else { "read" },
         size_to_string(dma_size),
-        size_to_string(page_size),
+        page_size,
         if second_run { "second" } else { "first" },
         if same { "same" } else { "diff" }
     ))?;

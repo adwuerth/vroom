@@ -22,10 +22,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize NVMe Driver
     let mut nvme = vroom::init(&pci_addr)?;
-    nvme.set_page_size(Pagesize::Page4K);
+    nvme.set_page_size(Pagesize::Page2M);
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_4KIB, &nvme)?;
+    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_4KIB)?;
     buffer[..bytes.len()].copy_from_slice(bytes);
 
     // Write the bytes to the NVMe memory
