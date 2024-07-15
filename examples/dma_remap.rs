@@ -42,7 +42,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let size = PAGESIZE_2MIB;
 
-    let ptr = Vfio::allocate_4kib(size);
+    let ptr = Vfio::allocate_4kib(size)?;
 
     println!("Allocated manual memory at {:p}", ptr);
 

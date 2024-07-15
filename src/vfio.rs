@@ -447,14 +447,6 @@ impl Vfio {
         size: usize,
     ) -> Result<Dma<T>, Box<dyn Error>> {
         // This is the main IOMMU work: IOMMU DMA MAP the memory...
-        if ptr == libc::MAP_FAILED {
-            return Err(format!(
-                "failed to memory map DMA-memory. Errno: {}",
-                std::io::Error::last_os_error()
-            )
-            .into());
-        }
-
         if USE_CDEV {
             return self.map_dma_cdev(ptr, size);
         }
@@ -572,22 +564,13 @@ impl Vfio {
         mgaw as u8
     }
 
-    /// Allocate `size` bytes memory with 1 GiB page size on the host device. Returns pointer to allocated memory
-    pub fn allocate_1gib(size: usize) -> *mut libc::c_void {
-        unsafe {
-            libc::mmap(
-                ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | libc::MAP_HUGE_1GB,
-                -1,
-                0,
-            )
-        }
+    /// Allocate `size` bytes memory with 1 GiB page size on the host device. Returns pointer to allocated memory, currently only works on 64 bit systems
+    pub fn allocate_1gib(size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
+        Self::mmap_memory(size, libc::MAP_HUGETLB | libc::MAP_HUGE_1GB)
     }
 
     /// Allocate `size` bytes memory with 2 MiB page size on the host device. Returns pointer to allocated memory
-    pub fn allocate_2mib(size: usize) -> *mut libc::c_void {
+    pub fn allocate_2mib(size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
         if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses. Since mmap() ignores libc::MAP_32BIT when
@@ -620,7 +603,7 @@ impl Vfio {
             }
 
             // finally map huge pages at the huge page size aligned 32-bit address
-            unsafe {
+            let ptr = unsafe {
                 libc::mmap(
                     aligned_addr.cast::<libc::c_void>(),
                     size,
@@ -633,54 +616,54 @@ impl Vfio {
                     -1,
                     0,
                 )
-            }
+            };
+            Self::check_ptr(ptr)
         } else {
-            unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_HUGETLB | libc::MAP_HUGE_2MB,
-                    -1,
-                    0,
-                )
-            }
+            Self::mmap_memory(size, libc::MAP_HUGETLB | libc::MAP_HUGE_2MB)
         }
     }
 
     /// Allocate `size` bytes memory with 4 KiB page size on the host device. Returns pointer to allocated memory
-    pub fn allocate_4kib(size: usize) -> *mut libc::c_void {
+    pub fn allocate_4kib(size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
         if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses.
 
             // Allocate memory of the needed size with 32-bit address space
-            unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_32BIT,
-                    -1,
-                    0,
-                )
-            }
+            Self::mmap_memory(size, libc::MAP_32BIT)
         } else {
-            // Allocate memory of the needed size
-            unsafe {
-                libc::mmap(
-                    ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_POPULATE, // todo remove MAP_POPULATE
-                    -1,
-                    0,
-                )
-            }
+            Self::mmap_memory(size, 0)
         }
     }
 
-    pub fn allocate_with_pagesize(&self, size: usize) -> *mut libc::c_void {
+    fn mmap_memory(size: usize, flags: libc::c_int) -> Result<*mut libc::c_void, Box<dyn Error>> {
+        let ptr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                flags | libc::MAP_SHARED | libc::MAP_ANONYMOUS | libc::MAP_POPULATE,
+                -1,
+                0,
+            )
+        };
+
+        Self::check_ptr(ptr)
+    }
+
+    fn check_ptr(ptr: *mut libc::c_void) -> Result<*mut libc::c_void, Box<dyn Error>> {
+        if ptr == libc::MAP_FAILED {
+            Err(format!(
+                "failed to memory mmap memory for DMA. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into())
+        } else {
+            Ok(ptr)
+        }
+    }
+
+    pub fn allocate_with_pagesize(&self, size: usize) -> Result<*mut libc::c_void, Box<dyn Error>> {
         let page_size = &self.page_size;
         match page_size {
             Pagesize::Page4K => Self::allocate_4kib(size),
@@ -696,7 +679,9 @@ impl Vfio {
 
 impl Allocating for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let ptr = self.allocate_with_pagesize(size);
+        let size = self.page_size.shift_up(size);
+        println!("Allocating {} with page_size {}", size, self.page_size);
+        let ptr = self.allocate_with_pagesize(size)?;
         self.map_dma(ptr, size)
     }
 

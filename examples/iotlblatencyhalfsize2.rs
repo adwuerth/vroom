@@ -57,16 +57,41 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     const ALLOC_SIZE: usize = 4096 * 2 * 2 * 2 * 2 * 2;
     //CURRENTLY ONLY SUPPORTS 4KIB
     const DMA_SIZE: usize = PAGESIZE_2MIB;
-    const SAME: bool = false;
+    const SAME: bool = true;
     const ALWAYS_SAME_DMA: bool = false;
     const SKIP_LATENCIES: usize = 0;
     const THRESHOLD: u128 = 10000;
     const SHUFFLE_HALFWAY: bool = false;
-    const SHUFFLE_FIRST: bool = false;
-    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
-    // nvme.set_page_size(page_size.clone());
+    const SHUFFLE_FIRST: bool = true;
+    let mut nvme = vroom::init(&pci_addr)?;
+    nvme.set_page_size(page_size.clone());
     // let mut nvme = pre_run(nvme)?;
     // let mut n = 4096 * 2 * 2 * 2 * 2 * 2;
+    // nvme = inv_iotlb(nvme, page_size.clone())?;
+
+    let blocks = 8;
+    // let bytes = 512 * blocks;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
+
+    let mut rng = rand::thread_rng();
+
+    let mut lba = 0;
+
+    let mut previous_dmas = vec![];
+
+    let split_size = PAGESIZE_4KIB;
+
+    let dma_size = ALLOC_SIZE * split_size;
+
+    let mut dma = nvme.allocate::<u8>(dma_size)?;
+    let rand_block = &(0..dma_size)
+        .map(|_| rand::random::<u8>())
+        .collect::<Vec<_>>()[..];
+    dma[0..dma_size].copy_from_slice(rand_block);
+    for i in 0..ALLOC_SIZE {
+        previous_dmas.push(dma.slice(i * split_size..(i + 1) * split_size));
+    }
+
     let mut n = 4;
     while n < ALLOC_SIZE {
         n *= 2;
@@ -78,34 +103,26 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         let mut half2: Vec<u128> = vec![];
         let mut half3: Vec<u128> = vec![];
 
-        let blocks = 8;
-        // let bytes = 512 * blocks;
-        let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
-
-        let mut rng = rand::thread_rng();
-
-        let mut lba = 0;
-
-        let mut previous_dmas = vec![];
-
-        let split_size = PAGESIZE_4KIB;
-
-        let dma_size = n * split_size;
-
-        let mut dma = nvme.allocate::<u8>(dma_size)?;
-        let rand_block = &(0..dma_size)
-            .map(|_| rand::random::<u8>())
-            .collect::<Vec<_>>()[..];
-        dma[0..dma_size].copy_from_slice(rand_block);
-        for i in 0..n {
-            previous_dmas.push(dma.slice(i * split_size..(i + 1) * split_size));
-        }
-
         if SHUFFLE_FIRST {
             previous_dmas.shuffle(&mut thread_rng());
         }
 
-        for previous_dma in &previous_dmas {
+        // let same_dma = &previous_dmas[0];
+        // for previous_dma in &previous_dmas[0..n] {
+        //     lba = if random {
+        //         rng.gen_range(0..ns_blocks)
+        //     } else {
+        //         (lba + 1) % ns_blocks
+        //     };
+
+        //     if write {
+        //         nvme.write(same_dma, lba * blocks)?;
+        //     } else {
+        //         nvme.read(same_dma, lba * blocks)?;
+        //     }
+        // }
+
+        for previous_dma in &previous_dmas[0..n] {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
             } else {
@@ -129,9 +146,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             previous_dmas.shuffle(&mut thread_rng());
         }
 
-        let same_dma = &previous_dmas[0];
-
-        for previous_dma in &previous_dmas {
+        for previous_dma in &previous_dmas[0..n] {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
             } else {
@@ -140,18 +155,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
             let before = Instant::now();
             if write {
-                if ALWAYS_SAME_DMA {
-                    nvme.write(same_dma, lba * blocks)?;
-                } else {
-                    nvme.write(previous_dma, lba * blocks)?;
-                }
+                nvme.write(previous_dma, lba * blocks)?;
             } else {
-                #[allow(clippy::collapsible_else_if)]
-                if ALWAYS_SAME_DMA {
-                    nvme.read(same_dma, lba * blocks)?;
-                } else {
-                    nvme.read(previous_dma, lba * blocks)?;
-                }
+                nvme.read(previous_dma, lba * blocks)?;
             }
             let elapsed = before.elapsed();
             if elapsed.as_nanos() < THRESHOLD {
@@ -166,18 +172,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
                 let before = Instant::now();
                 if write {
-                    if ALWAYS_SAME_DMA {
-                        nvme.write(same_dma, lba * blocks)?;
-                    } else {
-                        nvme.write(previous_dma, lba * blocks)?;
-                    }
+                    nvme.write(previous_dma, lba * blocks)?;
                 } else {
-                    #[allow(clippy::collapsible_else_if)]
-                    if ALWAYS_SAME_DMA {
-                        nvme.read(same_dma, lba * blocks)?;
-                    } else {
-                        nvme.read(previous_dma, lba * blocks)?;
-                    }
+                    nvme.read(previous_dma, lba * blocks)?;
                 }
                 let elapsed = before.elapsed();
                 if elapsed.as_nanos() < THRESHOLD {
@@ -218,9 +215,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             )?;
         }
 
-        if do_dealloc {
-            nvme.deallocate(dma)?;
-        }
+        // if do_dealloc {
+        //     nvme.deallocate(dma)?;
+        // }
+
+        // nvme = inv_iotlb(nvme, page_size.clone())?;
 
         if alloc_size_given.is_some() {
             return Ok(());
@@ -254,6 +253,15 @@ fn pre_run(mut nvme: NvmeDevice) -> Result<NvmeDevice, Box<dyn Error>> {
 
     nvme.deallocate(dma)?;
 
+    Ok(nvme)
+}
+
+fn inv_iotlb(mut nvme: NvmeDevice, page_size: Pagesize) -> Result<NvmeDevice, Box<dyn Error>> {
+    return Ok(nvme);
+    nvme.set_page_size(Pagesize::Page4K);
+    let dma = nvme.allocate::<u8>(PAGESIZE_4KIB)?;
+    nvme.deallocate(dma)?;
+    nvme.set_page_size(page_size);
     Ok(nvme)
 }
 
