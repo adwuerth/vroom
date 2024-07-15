@@ -6,8 +6,6 @@ use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 use std::{env, process, vec};
-use vroom::vfio::Vfio;
-use vroom::NvmeDevice;
 use vroom::{memory::*, Allocating};
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -29,16 +27,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let do_dealloc = match args.next() {
-        Some(arg) => arg == "dealloc",
-        None => false,
-    };
-
-    let alloc_size_given = match args.next() {
-        Some(arg) => Some(arg.parse::<usize>().unwrap()),
-        None => None,
-    };
-
     let page_size = match page_size.as_str() {
         "4k" => Pagesize::Page4K,
         "2m" => Pagesize::Page2M,
@@ -49,41 +37,40 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    // let mut nvme = vroom::init(&pci_addr)?;
-
     // CONFIG
+    //nvme
     let random = true;
     let write = true;
+
+    //max alloc size
     const ALLOC_SIZE: usize = 4096 * 2 * 2 * 2 * 2 * 2;
-    //CURRENTLY ONLY SUPPORTS 4KIB
+
+    // unused
     const DMA_SIZE: usize = PAGESIZE_2MIB;
-    const SAME: bool = false;
-    const ALWAYS_SAME_DMA: bool = false;
     const SKIP_LATENCIES: usize = 0;
+    const ALWAYS_SAME_DMA: bool = false;
+
+    const SAME: bool = false;
     const THRESHOLD: u128 = 10000;
+
     const SHUFFLE_HALFWAY: bool = false;
     const SHUFFLE_FIRST: bool = false;
     const SHUFFLE_ONCE: bool = false;
+
+    // initialise nvme with default 2mib queues -> 6 2mib iotlb entries
     let mut nvme = vroom::init(&pci_addr)?;
+
     nvme.set_page_size(page_size.clone());
-    let mut nvme = pre_run(nvme)?;
-    // let mut n = 4096 * 2 * 2 * 2 * 2 * 2;
-    nvme = inv_iotlb(nvme, page_size.clone())?;
-
     let blocks = 8;
-    // let bytes = 512 * blocks;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
-
     let mut rng = rand::thread_rng();
-
     let mut lba = 0;
-
     let mut previous_dmas = vec![];
 
     let split_size = PAGESIZE_4KIB;
-
     let dma_size = ALLOC_SIZE * split_size;
 
+    // allocate 1GiB for all page sizes for same conditions
     let mut dma = nvme.allocate::<u8>(PAGESIZE_1GIB)?;
     let rand_block = &(0..dma_size)
         .map(|_| rand::random::<u8>())
@@ -92,6 +79,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     for i in 0..ALLOC_SIZE {
         previous_dmas.push(dma.slice(i * split_size..(i + 1) * split_size));
     }
+
     if SHUFFLE_ONCE {
         previous_dmas.shuffle(&mut thread_rng());
     }
@@ -101,9 +89,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     while n < (ALLOC_SIZE >> 1) {
         n *= 2;
 
-        if let Some(l) = alloc_size_given {
-            n = l;
-        }
         let mut half1: Vec<u128> = vec![];
         let mut half2: Vec<u128> = vec![];
         let mut half3: Vec<u128> = vec![];
@@ -112,23 +97,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             previous_dmas.shuffle(&mut thread_rng());
         }
 
-        // let same_dma = &previous_dmas[0];
-        // for previous_dma in &previous_dmas[0..n] {
-        //     lba = if random {
-        //         rng.gen_range(0..ns_blocks)
-        //     } else {
-        //         (lba + 1) % ns_blocks
-        //     };
-
-        //     if write {
-        //         nvme.write(same_dma, lba * blocks)?;
-        //     } else {
-        //         nvme.read(same_dma, lba * blocks)?;
-        //     }
-        // }
-
-        // let dma_arr: &[Dma<u8>] = &previous_dmas[previous_ctr..previous_ctr + n];
-
+        // reverse slice to prevent any weird buffering
         for previous_dma in previous_dmas[previous_ctr..previous_ctr + n].iter().rev() {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
@@ -153,7 +122,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             previous_dmas.shuffle(&mut thread_rng());
         }
 
-        for previous_dma in previous_dmas[previous_ctr..previous_ctr + n].iter().rev() {
+        for previous_dma in &previous_dmas[previous_ctr..previous_ctr + n] {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
             } else {
@@ -221,56 +190,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 true,
             )?;
         }
-
-        // if do_dealloc {
-        //     nvme.deallocate(dma)?;
-        // }
-
-        // nvme = inv_iotlb(nvme, page_size.clone())?;
-
         previous_ctr += n;
-
-        if alloc_size_given.is_some() {
-            return Ok(());
-        }
     }
     Ok(())
-}
-
-fn pre_run(mut nvme: NvmeDevice) -> Result<NvmeDevice, Box<dyn Error>> {
-    let blocks = 8;
-    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
-
-    let mut rng = rand::thread_rng();
-
-    let mut lba;
-
-    let mut previous_dmas = vec![];
-
-    let n = 2048;
-
-    let dma = nvme.allocate::<u8>(n * PAGESIZE_4KIB)?;
-    for i in 0..n {
-        previous_dmas.push(dma.slice(i * PAGESIZE_4KIB..(i + 1) * PAGESIZE_4KIB));
-    }
-
-    for previous_dma in &previous_dmas {
-        lba = rng.gen_range(0..ns_blocks);
-
-        nvme.write(previous_dma, lba * blocks)?;
-    }
-
-    nvme.deallocate(dma)?;
-
-    Ok(nvme)
-}
-
-fn inv_iotlb(mut nvme: NvmeDevice, page_size: Pagesize) -> Result<NvmeDevice, Box<dyn Error>> {
-    nvme.set_page_size(Pagesize::Page4K);
-    let dma = nvme.allocate::<u8>(PAGESIZE_4KIB)?;
-    nvme.deallocate(dma)?;
-    nvme.set_page_size(page_size);
-    Ok(nvme)
 }
 
 fn write_nanos_to_file(
