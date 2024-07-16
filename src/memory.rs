@@ -101,7 +101,6 @@ pub trait DmaSlice {
     fn slice(&self, range: Range<usize>) -> Self::Item;
 }
 
-// mildly overengineered lol
 pub struct DmaChunks<'a, T> {
     current_offset: usize,
     chunk_size: usize,
