@@ -10,7 +10,7 @@ use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io, mem, process, ptr};
 
-use crate::memory;
+use crate::{memory, nvme};
 
 static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -19,9 +19,36 @@ pub struct Mmio {
 }
 
 impl Mmio {
-    pub fn init(pci_addr: &str) -> Self {
+    pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let pci_addr = pci_addr.to_string();
-        Self { pci_addr }
+        let mmio = Self { pci_addr };
+        mmio.bind_to_stub_driver()?;
+        Ok(mmio)
+    }
+
+    // todo check if this works
+    fn bind_to_stub_driver(&self) -> Result<(), Box<dyn Error>> {
+        let vendor_path = format!("/sys/bus/pci/devices/{}/vendor", self.pci_addr);
+        let device_path = format!("/sys/bus/pci/devices/{}/device", self.pci_addr);
+
+        let vendor = fs::read_to_string(vendor_path)?;
+        let device = fs::read_to_string(device_path)?;
+
+        let nvme_vd = format!("{vendor} {device}");
+
+        let unbind_path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
+        let mut file = fs::OpenOptions::new().write(true).open(unbind_path)?;
+        file.write_all(self.pci_addr.as_bytes());
+
+        let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
+        let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
+        file.write_all(nvme_vd.as_bytes());
+
+        let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
+        let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;
+        file.write_all(self.pci_addr.as_bytes());
+
+        Ok(())
     }
 
     /// Translates a virtual address to its physical counterpart

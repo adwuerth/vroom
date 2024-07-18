@@ -287,7 +287,7 @@ impl NvmeDevice {
         // Map the device's resource0
         let (addr, len) = allocator.map_resource()?;
 
-        let buffer: Dma<u8> = allocator.allocate(PAGESIZE_2MIB)?;
+        let buffer: Dma<u8> = allocator.allocate(PAGESIZE_4KIB)?;
         let prp_list: Dma<[u64; 512]> = allocator.allocate(PAGESIZE_4KIB)?;
 
         let mut dev = Self {

@@ -39,7 +39,7 @@ impl IOAllocator {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-            Self::MmioAllocator(Mmio::init(pci_addr))
+            Self::MmioAllocator(Mmio::init(pci_addr)?)
         })
     }
 

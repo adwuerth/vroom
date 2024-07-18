@@ -43,7 +43,7 @@ lazy_static! {
 
 macro_rules! ioctl {
     ($fd:expr, $request:expr, $arg:expr, $error:expr) => {{
-        let result = unsafe { ioctl($fd, $request, $arg) };
+        let result = unsafe { libc::ioctl($fd, $request, $arg) };
         if result < 0 {
             Err(format!(
                 "{} Errno: {}",
@@ -55,7 +55,7 @@ macro_rules! ioctl {
         }
     }};
     ($fd:expr, $request:expr, $error:expr) => {{
-        let result = unsafe { ioctl($fd, $request) };
+        let result = unsafe { libc::ioctl($fd, $request) };
         if result < 0 {
             Err(format!(
                 "{} Errno: {}",
@@ -342,13 +342,13 @@ impl Vfio {
             size: 0,
             offset: 0,
         };
-        if unsafe { libc::ioctl(self.device_fd, VFIO_DEVICE_GET_REGION_INFO, &mut conf_reg) } == -1
-        {
-            return Err(format!(
-                "failed to VFIO_DEVICE_GET_REGION_INFO for index VFIO_PCI_CONFIG_REGION_INDEX. Errno: {}",
-                std::io::Error::last_os_error()
-            ).into());
-        }
+
+        ioctl!(
+            self.device_fd,
+            VFIO_DEVICE_GET_REGION_INFO,
+            &mut conf_reg,
+            "failed to VFIO_DEVICE_GET_REGION_INFO for index VFIO_PCI_CONFIG_REGION_INDEX"
+        )?;
 
         // Read current value of command register
         let mut dma: u16 = 0;
@@ -401,20 +401,13 @@ impl Vfio {
             size: 0,
             offset: 0,
         };
-        if unsafe {
-            libc::ioctl(
-                self.device_fd,
-                VFIO_DEVICE_GET_REGION_INFO,
-                &mut region_info,
-            )
-        } == -1
-        {
-            return Err(format!(
-                "failed to VFIO_DEVICE_GET_REGION_INFO. Errno: {}",
-                std::io::Error::last_os_error()
-            )
-            .into());
-        }
+
+        ioctl!(
+            self.device_fd,
+            VFIO_DEVICE_GET_REGION_INFO,
+            &mut region_info,
+            "failed to VFIO_DEVICE_GET_REGION_INFO"
+        )?;
 
         let len = region_info.size as usize;
 
@@ -484,15 +477,6 @@ impl Vfio {
         size: usize,
     ) -> Result<Dma<T>, Box<dyn Error>> {
         println!("mapping DMA with cdev");
-        // let mut map = iommu_ioas_map {
-        //     size: mem::size_of::<iommu_ioas_map>() as u32,
-        //     flags: IOMMU_IOAS_MAP_FIXED_IOVA | IOMMU_IOAS_MAP_WRITEABLE | IOMMU_IOAS_MAP_READABLE,
-        //     ioas_id: self.ioas_id,
-        //     __reserved: 0,
-        //     user_va: ptr as u64,
-        //     length: size as u64,
-        //     iova: ptr as u64,
-        // };
         let mut map = iommu_ioas_map {
             size: mem::size_of::<iommu_ioas_map>() as u32,
             flags: IOMMU_IOAS_MAP_WRITEABLE | IOMMU_IOAS_MAP_READABLE,

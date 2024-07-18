@@ -4,7 +4,7 @@ use crate::memory::Dma;
 use crate::PAGESIZE_2MIB;
 use std::error::Error;
 use std::hint::spin_loop;
-use std::{array, ptr};
+use std::{array, mem, ptr};
 
 /// `NVMe` spec 4.6
 /// Completion queue entry
@@ -27,7 +27,8 @@ pub struct NvmeCompletion {
 }
 
 /// maximum amount of submission entries on a 2MiB huge page
-pub const QUEUE_LENGTH: usize = 1024;
+// pub const QUEUE_LENGTH: usize = 1024;
+pub const QUEUE_LENGTH: usize = 64;
 
 /// Submission queue
 pub struct NvmeSubQueue {
@@ -46,7 +47,7 @@ impl NvmeSubQueue {
         len: usize,
         doorbell: usize,
     ) -> Result<Self, Box<dyn Error>> {
-        let commands = allocator.allocate(PAGESIZE_2MIB)?;
+        let commands = allocator.allocate(64 * QUEUE_LENGTH)?;
 
         Ok(Self {
             commands,
@@ -107,7 +108,7 @@ impl NvmeCompQueue {
         len: usize,
         doorbell: usize,
     ) -> Result<Self, Box<dyn Error>> {
-        let commands = allocator.allocate(PAGESIZE_2MIB)?;
+        let commands = allocator.allocate(mem::size_of::<NvmeCompletion>() * QUEUE_LENGTH)?;
         Ok(Self {
             commands,
             head: 0,
