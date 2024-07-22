@@ -56,6 +56,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
 
+    // let dma = nvme.allocate::<u8>(page_size.size())?;
+    // nvme.write(&dma, 0)?;
+    // nvme.deallocate(dma)?;
+
     // nvme.set_page_size(page_size.clone());
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
@@ -80,7 +84,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     println!("alloc done");
 
     let mut latencies: Vec<u128> = vec![];
-    for _i in 0..4096 {
+    for _i in 0..64 {
         for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
@@ -111,7 +115,7 @@ fn write_nanos_to_file(
     second_run: bool,
     extra_param: &str,
 ) -> Result<(), Box<dyn Error>> {
-    const IOMMU: &str = "pt";
+    const IOMMU: &str = "vfio";
     let mut file = File::create(format!(
         "latency_intmap_{}_{}ps_{buffer_mult}_{IOMMU}_{}_{extra_param}.txt",
         if write { "write" } else { "read" },

@@ -1,14 +1,12 @@
-use csv::Writer;
 use rand::Rng;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread, vec};
 use vroom::memory::*;
-use vroom::vfio::Vfio;
 
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
@@ -32,42 +30,23 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         None => None,
     };
 
+    let page_size = match args.next() {
+        Some(arg) => Pagesize::from_str(&arg)?,
+        None => Pagesize::Page2M,
+    };
+
     let duration = duration.unwrap();
 
-    let mut nvme = vroom::init(&pci_addr)?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size)?;
 
     let random = true;
     let write = false;
 
     let (nvme, mut latencies) = qd_1_singlethread_latency(nvme, write, random, duration)?;
 
-    // let (nvme, mut latencies) = qd_n_multithread(nvme, 1, 1, duration, random, write)?;
-    // to_microseconds(&mut latencies);
-
     write_nanos_to_file(latencies, write)?;
 
-    // let latencies = round_to_nearest_100(latencies);
-
-    // let latencies = nanos_vec_to_microseconds(latencies);
-
-    // write_latencies_to_csv_dup_f64(latencies, &csv_name(&pci_addr, write))?;
-
-    // to_microseconds(&mut latencies);
-    // let percentiles = calculate_percentiles(&mut latencies);
-    // println!("{:?}", percentiles);
     Ok(())
-}
-
-fn csv_name(pci_addr: &str, write: bool) -> String {
-    format!(
-        "vroom-{}-{}-cdf.csv",
-        if Vfio::is_enabled(pci_addr) {
-            "vfio"
-        } else {
-            "mmio"
-        },
-        if write { "write" } else { "read" }
-    )
 }
 
 fn write_nanos_to_file(latencies: Vec<u128>, write: bool) -> Result<(), Box<dyn Error>> {
@@ -79,52 +58,6 @@ fn write_nanos_to_file(latencies: Vec<u128>, write: bool) -> Result<(), Box<dyn 
         writeln!(file, "{}", lat)?;
     }
     Ok(())
-}
-
-fn seconds_vec_to_microseconds(latencies: &mut [f64]) {
-    for latency in latencies.iter_mut() {
-        *latency *= 1_000_000.0;
-    }
-}
-
-fn nanos_vec_to_microseconds(latencies: Vec<u128>) -> Vec<f64> {
-    let mut vec = vec![];
-    for latency in latencies.into_iter() {
-        vec.push(latency as f64 / 1000.0)
-    }
-    vec
-}
-
-fn calculate_percentiles(latencies: &mut [f64]) -> (f64, f64, Vec<f64>) {
-    latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-    let len = latencies.len();
-
-    let f = |p: f64| latencies[(len as f64 * p).ceil() as usize - 1];
-
-    let average: f64 = latencies.iter().sum::<f64>() / len as f64;
-
-    let max_latency: f64 = *latencies.last().unwrap();
-
-    (
-        average,
-        max_latency,
-        vec![f(0.90), f(0.99), f(0.999), f(0.9999), f(0.99999)],
-    )
-}
-
-fn round_to_nearest_100(ns_vec: Vec<u128>) -> Vec<u128> {
-    ns_vec
-        .into_iter()
-        .map(|ns| {
-            let remainder = ns % 10;
-            if remainder >= 5 {
-                ns + (10 - remainder)
-            } else {
-                ns - remainder
-            }
-        })
-        .collect()
 }
 
 fn qd_n_multithread_latency_nanos(
@@ -389,71 +322,4 @@ fn qd_1_singlethread_latency(
     );
 
     Ok((nvme, latencies))
-}
-
-fn write_latencies_to_csv(latencies: Vec<f64>, filename: &str) -> Result<(), Box<dyn Error>> {
-    let mut wtr = Writer::from_path(filename)?;
-
-    let mut sorted_latencies = latencies.clone();
-    sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let percentiles: Vec<f64> = (1..=sorted_latencies.len())
-        .map(|i| i as f64 / sorted_latencies.len() as f64 * 100.0)
-        .collect();
-
-    wtr.write_record(["latency", "cdf"])?;
-
-    for (latency, percentile) in sorted_latencies.iter().zip(percentiles.iter()) {
-        wtr.write_record(&[latency.to_string(), percentile.to_string()])?;
-    }
-
-    wtr.flush()?;
-    Ok(())
-}
-
-fn write_latencies_to_csv_dup_f64(
-    latencies: Vec<f64>,
-    filename: &str,
-) -> Result<(), Box<dyn Error>> {
-    let mut wtr = Writer::from_path(filename)?;
-
-    // Count duplicate latencies
-    let mut latency_counts: HashMap<u64, (f64, usize)> = HashMap::new();
-    for latency in latencies {
-        let key = latency.to_bits(); // Convert f64 to u64 bit representation
-        let entry = latency_counts.entry(key).or_insert((latency, 0));
-        entry.1 += 1;
-    }
-
-    // Create a sorted list of unique latencies
-    let mut unique_latencies: Vec<(f64, usize)> =
-        latency_counts.into_iter().map(|(_, v)| v).collect();
-    unique_latencies.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-    // Calculate percentiles for grouped data
-    let mut total_count = 0;
-    for (_, count) in &unique_latencies {
-        total_count += count;
-    }
-
-    let mut cumulative_count = 0;
-    let mut percentile_data = Vec::new();
-    for (latency, count) in unique_latencies {
-        cumulative_count += count;
-        let percentile = cumulative_count as f64 / total_count as f64;
-        percentile_data.push((latency, percentile));
-    }
-
-    // Write header
-    wtr.write_record(&["latency", "cdf"])?;
-
-    // Write data
-    for (latency, percentile) in percentile_data {
-        if percentile >= 1.0 || latency > 1000.0 {
-            continue;
-        }
-        wtr.write_record(&[latency.to_string(), percentile.to_string()])?;
-    }
-
-    wtr.flush()?;
-    Ok(())
 }

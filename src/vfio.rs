@@ -4,6 +4,7 @@
 use crate::ioallocator::Allocating;
 use crate::PAGESIZE_2MIB;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::mem;
@@ -88,6 +89,9 @@ impl Vfio {
         Self::init_with_args(pci_addr, Pagesize::Page2M, false)
     }
 
+    /// Initializes the IOMMU for a given PCI device. The device must be bound to the VFIO driver.
+    /// # Panics
+    /// # Errors
     #[allow(clippy::too_many_lines)]
     pub fn init_with_args(
         pci_addr: &str,
@@ -658,6 +662,15 @@ impl Vfio {
 
     pub fn set_page_size(&mut self, page_size: Pagesize) {
         self.page_size = page_size;
+    }
+}
+
+impl Error for Vfio {}
+
+impl Display for Vfio {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Vfio {{ pci_addr: {}, device_fd: {}, container_fd: {}, ioas_id: {}, iommufd: {}, page_size: {} }}",
+               self.pci_addr, self.device_fd, self.container_fd, self.ioas_id, self.iommufd, self.page_size)
     }
 }
 

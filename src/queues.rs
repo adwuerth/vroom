@@ -28,6 +28,7 @@ pub struct NvmeCompletion {
 
 /// maximum amount of submission entries on a 2MiB huge page
 // pub const QUEUE_LENGTH: usize = 1024;
+// pub const QUEUE_LENGTH: usize = (PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1;
 pub const QUEUE_LENGTH: usize = 64;
 
 /// Submission queue
@@ -47,7 +48,7 @@ impl NvmeSubQueue {
         len: usize,
         doorbell: usize,
     ) -> Result<Self, Box<dyn Error>> {
-        let commands = allocator.allocate(64 * QUEUE_LENGTH)?;
+        let commands = allocator.allocate(mem::size_of::<NvmeCommand>() * QUEUE_LENGTH)?;
 
         Ok(Self {
             commands,

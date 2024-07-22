@@ -22,7 +22,15 @@ impl Mmio {
     pub fn init(pci_addr: &str) -> Result<Self, Box<dyn Error>> {
         let pci_addr = pci_addr.to_string();
         let mmio = Self { pci_addr };
-        mmio.bind_to_stub_driver()?;
+
+        // mmio.bind_to_stub_driver()?;
+
+        // mmio.unbind_driver()?;
+
+        mmio.enable_dma()?;
+
+        mmio.disable_interrupts()?;
+
         Ok(mmio)
     }
 
@@ -36,17 +44,22 @@ impl Mmio {
 
         let nvme_vd = format!("{vendor} {device}");
 
+        println!("now trying to bind to pci-stub");
+
         let unbind_path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
         let mut file = fs::OpenOptions::new().write(true).open(unbind_path)?;
-        file.write_all(self.pci_addr.as_bytes());
+        file.write_all(self.pci_addr.as_bytes())?;
+        println!("unbound driver");
 
         let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
         let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
-        file.write_all(nvme_vd.as_bytes());
+        file.write_all(nvme_vd.as_bytes())?;
+        println!("set new id");
 
         let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
         let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;
-        file.write_all(self.pci_addr.as_bytes());
+        file.write_all(self.pci_addr.as_bytes())?;
+        println!("bound to pci-stub");
 
         Ok(())
     }
@@ -161,12 +174,6 @@ impl Allocating for Mmio {
     /// Mmaps a pci resource0 and returns a pointer to the mapped memory.
     fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
         let path = format!("/sys/bus/pci/devices/{}/resource0", self.pci_addr);
-
-        self.unbind_driver()?;
-
-        self.enable_dma()?;
-
-        self.disable_interrupts()?;
 
         let file = fs::OpenOptions::new().read(true).write(true).open(&path)?;
         let len = fs::metadata(&path)?.len() as usize;

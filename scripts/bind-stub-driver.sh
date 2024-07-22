@@ -10,6 +10,7 @@ else
 fi
 
 nvme_vd="$(cat /sys/bus/pci/devices/$nvme/vendor) $(cat /sys/bus/pci/devices/$nvme/device)"
+modprobe pci-stub
 echo $nvme > /sys/bus/pci/devices/$nvme/driver/unbind
-echo "$nvme_vd" > /sys/bus/pci/drivers/pci-stub/new_id
+# echo "$nvme_vd" > /sys/bus/pci/drivers/pci-stub/new_id
 echo $nvme > /sys/bus/pci/drivers/pci-stub/bind

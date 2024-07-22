@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
 use std::slice;
+use std::str::FromStr;
 
 use crate::ioallocator::{Allocating, IOAllocator};
 use crate::NvmeDevice;
@@ -51,7 +52,7 @@ impl Pagesize {
 
     #[must_use]
     #[allow(clippy::match_same_arms)]
-    pub const fn from(size: usize) -> Self {
+    pub const fn from_usize(size: usize) -> Self {
         match size {
             PAGESIZE_4KIB => Self::Page4K,
             PAGESIZE_2MIB => Self::Page2M,
@@ -61,13 +62,28 @@ impl Pagesize {
     }
 }
 
+#[allow(clippy::match_same_arms)]
+impl FromStr for Pagesize {
+    type Err = std::string::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "4k" => Self::Page4K,
+            "2m" => Self::Page2M,
+            "1g" => Self::Page1G,
+            _ => Self::Page2M,
+        })
+    }
+}
+
 impl Display for Pagesize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Page4K => write!(f, "4KiB"),
-            Self::Page2M => write!(f, "2MiB"),
-            Self::Page1G => write!(f, "1GiB"),
-        }
+        let str = match self {
+            Self::Page4K => "4KiB",
+            Self::Page2M => "2MiB",
+            Self::Page1G => "1GiB",
+        };
+        write!(f, "{str}")
     }
 }
 

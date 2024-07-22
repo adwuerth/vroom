@@ -57,7 +57,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = qd_n_multithread(nvme, 32, 4, duration, random, write, page_size.clone());
+    let nvme = qd_n_multithread(nvme, 32, 4, duration, random, write);
 
     Ok(())
 }
@@ -69,15 +69,12 @@ fn qd_n_multithread(
     duration: Duration,
     random: bool,
     write: bool,
-    page_size: Pagesize,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
 
     let nvme = Arc::new(Mutex::new(nvme));
     let mut threads = Vec::new();
-
-    let ps = page_size.size();
 
     for _ in 0..thread_count {
         let nvme = Arc::clone(&nvme);
@@ -93,13 +90,11 @@ fn qd_n_multithread(
 
             let mut buffer_index = 0;
 
-            nvme.lock().unwrap().set_page_size(Pagesize::Page2M);
             let mut qpair = nvme
                 .lock()
                 .unwrap()
                 .create_io_queue_pair(QUEUE_LENGTH)
                 .unwrap();
-            nvme.lock().unwrap().set_page_size(Pagesize::from(ps));
 
             let rand_block = &(0..BUFFER_SIZE)
                 .map(|_| rand::random::<u8>())

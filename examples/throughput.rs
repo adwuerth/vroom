@@ -1,5 +1,6 @@
 use rand::{thread_rng, Rng};
 use std::error::Error;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread};
@@ -28,18 +29,24 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         None => None,
     };
 
+    let page_size = match args.next() {
+        Some(arg) => Pagesize::from_str(&arg)?,
+        None => {
+            eprintln!("Usage: cargo run --example init <pci bus id> <page size>");
+            process::exit(1);
+        }
+    };
+
     let duration = duration.unwrap();
 
-    let mut nvme = vroom::init(&pci_addr)?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size)?;
 
-    nvme.set_page_size(Pagesize::Page4K);
-
-    let random = false;
-    let write = false;
+    let random = true;
+    let write = true;
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 1, 1, duration, random, write)?;
+    let nvme = test_throughput_random(nvme, 256, 32, duration, random, write)?;
 
     Ok(())
 }

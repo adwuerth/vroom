@@ -26,9 +26,6 @@ fi
 
 modprobe vfio-pci
 nvme_vd="$(cat /sys/bus/pci/devices/$nvme/vendor) $(cat /sys/bus/pci/devices/$nvme/device)"
-# echo "$nvme_vd" > "/sys/bus/pci/drivers/vfio-pci/remove_id"
-# echo 1 > "/sys/bus/pci/devices/$nvme/remove"
-# echo 1 > "/sys/bus/pci/rescan"
 echo $nvme > /sys/bus/pci/devices/$nvme/driver/unbind
 echo "$nvme_vd" > /sys/bus/pci/drivers/vfio-pci/new_id
 chown $user:$group /dev/vfio/*
