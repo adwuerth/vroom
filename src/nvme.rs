@@ -1,7 +1,7 @@
 use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::{Dma, DmaSlice, Pagesize};
-use crate::queues::{NvmeCompQueue, NvmeCompletion, NvmeSubQueue, QUEUE_LENGTH};
+use crate::queues::{CompletionQueue, NvmeCompletion, SubmissionQueue, QUEUE_LENGTH};
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::error::Error;
@@ -92,8 +92,8 @@ struct IdentifyNamespaceData {
 
 pub struct NvmeQueuePair {
     pub id: u16,
-    pub sub_queue: NvmeSubQueue,
-    comp_queue: NvmeCompQueue,
+    pub sub_queue: SubmissionQueue,
+    comp_queue: CompletionQueue,
 }
 
 impl NvmeQueuePair {
@@ -245,10 +245,10 @@ pub struct NvmeDevice {
     len: usize,
     // Doorbell stride
     dstrd: u16,
-    admin_sq: NvmeSubQueue,
-    admin_cq: NvmeCompQueue,
-    io_sq: NvmeSubQueue,
-    io_cq: NvmeCompQueue,
+    admin_sq: SubmissionQueue,
+    admin_cq: CompletionQueue,
+    io_sq: SubmissionQueue,
+    io_cq: CompletionQueue,
     buffer: Dma<u8>,           // 2MiB of buffer
     prp_list: Dma<[u64; 512]>, // Address of PRP's, devices doesn't necessarily support 2MiB page sizes; 8 Bytes * 512 = 4096
     pub namespaces: HashMap<u32, NvmeNamespace>,
@@ -307,10 +307,10 @@ impl NvmeDevice {
                 }
             },
             len,
-            admin_sq: NvmeSubQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            admin_cq: NvmeCompQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            io_sq: NvmeSubQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            io_cq: NvmeCompQueue::new(&allocator, QUEUE_LENGTH, 0)?,
+            admin_sq: SubmissionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
+            admin_cq: CompletionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
+            io_sq: SubmissionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
+            io_cq: CompletionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
             buffer,
             prp_list,
             namespaces: HashMap::new(),
@@ -456,7 +456,7 @@ impl NvmeDevice {
 
         let dbl = self.addr as usize + offset;
 
-        let comp_queue = NvmeCompQueue::new(&self.allocator, len, dbl)?;
+        let comp_queue = CompletionQueue::new(&self.allocator, len, dbl)?;
         let comp = self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::create_io_completion_queue(
                 c_id,
@@ -467,7 +467,7 @@ impl NvmeDevice {
         })?;
 
         let dbl = self.addr as usize + 0x1000 + ((4 << self.dstrd) * (2 * q_id) as usize);
-        let sub_queue = NvmeSubQueue::new(&self.allocator, len, dbl)?;
+        let sub_queue = SubmissionQueue::new(&self.allocator, len, dbl)?;
         let comp = self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::create_io_submission_queue(
                 c_id,

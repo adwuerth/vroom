@@ -32,7 +32,7 @@ pub struct NvmeCompletion {
 pub const QUEUE_LENGTH: usize = 64;
 
 /// Submission queue
-pub struct NvmeSubQueue {
+pub struct SubmissionQueue {
     // TODO: switch to mempool for larger queue
     // commands: Dma<[NvmeCommand; QUEUE_LENGTH]>,
     commands: Dma<u8>,
@@ -42,7 +42,7 @@ pub struct NvmeSubQueue {
     pub doorbell: usize,
 }
 
-impl NvmeSubQueue {
+impl SubmissionQueue {
     pub fn new(
         allocator: &MemoryMapping,
         len: usize,
@@ -94,7 +94,7 @@ impl NvmeSubQueue {
 }
 
 /// Completion queue
-pub struct NvmeCompQueue {
+pub struct CompletionQueue {
     commands: Dma<[NvmeCompletion; QUEUE_LENGTH]>,
     head: usize,
     phase: bool,
@@ -103,7 +103,7 @@ pub struct NvmeCompQueue {
 }
 
 // TODO: error handling
-impl NvmeCompQueue {
+impl CompletionQueue {
     pub fn new(
         allocator: &MemoryMapping,
         len: usize,
@@ -119,9 +119,7 @@ impl NvmeCompQueue {
         })
     }
 
-    // #[inline(always)]
     pub fn complete(&mut self) -> Option<(usize, NvmeCompletion, usize)> {
-        // println!("{:?}", self.commands);
         let entry = &self.commands[self.head];
 
         if ((entry.status & 1) == 1) == self.phase {
@@ -136,8 +134,6 @@ impl NvmeCompQueue {
         }
     }
 
-    ///
-    // #[inline(always)]
     pub fn complete_n(&mut self, commands: usize) -> (usize, NvmeCompletion, usize) {
         let prev = self.head;
         self.head += commands - 1;
@@ -150,7 +146,6 @@ impl NvmeCompQueue {
         (head, entry, prev)
     }
 
-    // #[inline(always)]
     pub fn complete_spin(&mut self) -> (usize, NvmeCompletion, usize) {
         loop {
             if let Some(val) = self.complete() {

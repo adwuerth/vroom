@@ -77,23 +77,23 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let mut dma = nvme.allocate::<u8>(dma_size)?;
 
-    let rand_block = &(0..dma_size)
-        .map(|_| rand::random::<u8>())
-        .collect::<Vec<_>>()[..];
-    dma[0..dma_size].copy_from_slice(rand_block);
+    // let rand_block = &(0..dma_size)
+    //     .map(|_| rand::random::<u8>())
+    //     .collect::<Vec<_>>()[..];
+    // dma[0..dma_size].copy_from_slice(rand_block);
 
     for i in 0..alloc_size / split_mult {
-        // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
-        //     .map(|_| rand::random::<u8>())
-        //     .collect::<Vec<_>>()[..];
-        // dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
+        let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
+            .map(|_| rand::random::<u8>())
+            .collect::<Vec<_>>()[..];
+        dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
         previous_dmas.push(dma.slice(i * dma_mult..(i * dma_mult) + split_size));
     }
 
     println!("alloc done");
 
     let mut latencies: Vec<u128> = vec![];
-    for _i in 0..512 {
+    for _i in 0..1024 {
         for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
@@ -125,7 +125,7 @@ fn write_nanos_to_file(
     second_run: bool,
     extra_param: &str,
 ) -> Result<(), Box<dyn Error>> {
-    const IOMMU: &str = "vfio";
+    const IOMMU: &str = "mmio";
     let mut file = File::create(format!(
         "latency_intmap_{}_{}ps_{buffer_mult}_{IOMMU}_{}_{extra_param}.txt",
         if write { "write" } else { "read" },

@@ -661,6 +661,28 @@ impl Vfio {
     pub fn set_page_size(&mut self, page_size: Pagesize) {
         self.page_size = page_size;
     }
+
+    fn advise_thp(ptr: *mut libc::c_void, size: usize) -> Result<(), Box<dyn Error>> {
+        if unsafe { libc::madvise(ptr, size, libc::MADV_HUGEPAGE) } != 0 {
+            return Err(format!(
+                "failed to mmap memory for DMA. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into());
+        };
+        Ok(())
+    }
+
+    fn advise_nothp(ptr: *mut libc::c_void, size: usize) -> Result<(), Box<dyn Error>> {
+        if unsafe { libc::madvise(ptr, size, libc::MADV_NOHUGEPAGE) } != 0 {
+            return Err(format!(
+                "failed to mmap memory for DMA. Errno: {}",
+                std::io::Error::last_os_error()
+            )
+            .into());
+        };
+        Ok(())
+    }
 }
 
 impl Error for Vfio {}
