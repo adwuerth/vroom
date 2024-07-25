@@ -1,5 +1,7 @@
+#![allow(non_camel_case_types, unused)]
+
 /// struct `vfio_iommu_type1_dma_map`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct vfio_iommu_type1_dma_map {
@@ -11,7 +13,6 @@ pub struct vfio_iommu_type1_dma_map {
 }
 
 /// struct `vfio_iommu_type1_dma_unmap`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(C)]
 pub struct vfio_iommu_type1_dma_unmap {
@@ -23,7 +24,6 @@ pub struct vfio_iommu_type1_dma_unmap {
 }
 
 /// struct `vfio_group_status`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_group_status {
     pub argsz: u32,
@@ -31,7 +31,6 @@ pub struct vfio_group_status {
 }
 
 /// struct `vfio_region_info`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_region_info {
     pub argsz: u32,
@@ -43,7 +42,6 @@ pub struct vfio_region_info {
 }
 
 /// struct `vfio_iommu_type1_info`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_iommu_type1_info {
     pub argsz: u32,
@@ -58,7 +56,6 @@ pub struct vfio_iommu_type1_info {
 /// As this is a dynamically sized struct (has an array at the end) we need to use
 /// Dynamically Sized Types (DSTs) which can be found at
 /// https://doc.rust-lang.org/nomicon/exotic-sizes.html#dynamically-sized-types-dsts
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_irq_set<T: ?Sized> {
     pub argsz: u32,
@@ -70,7 +67,6 @@ pub struct vfio_irq_set<T: ?Sized> {
 }
 
 /// struct `vfio_irq_info`, grabbed from linux/vfio.h
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_irq_info {
     pub argsz: u32,
@@ -81,7 +77,6 @@ pub struct vfio_irq_info {
     /* Number of IRQs within this index */
 }
 
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct iommu_ioas_map {
     pub size: u32,
@@ -93,7 +88,6 @@ pub struct iommu_ioas_map {
     pub iova: u64,
 }
 
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_device_bind_iommufd {
     pub argsz: u32,
@@ -102,7 +96,6 @@ pub struct vfio_device_bind_iommufd {
     pub out_devid: u32,
 }
 
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct iommu_ioas_alloc {
     pub size: u32,
@@ -110,7 +103,6 @@ pub struct iommu_ioas_alloc {
     pub out_ioas_id: u32,
 }
 
-#[allow(non_camel_case_types)]
 #[repr(C)]
 pub struct vfio_device_attach_iommufd_pt {
     pub argsz: u32,

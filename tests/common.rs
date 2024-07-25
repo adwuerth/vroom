@@ -1,6 +1,6 @@
 use std::{env, process};
 use vroom::memory::Dma;
-use vroom::{self, NvmeDevice};
+use vroom::{self, Mapping, NvmeDevice};
 
 pub fn get_pci_addr() -> String {
     env::var("NVME_ADDR").unwrap_or_else(|_| {
@@ -17,7 +17,7 @@ pub fn init_nvme(pci_addr: &str) -> NvmeDevice {
 }
 
 pub fn allocate_dma_buffer(nvme: &NvmeDevice, size: usize) -> Dma<u8> {
-    Dma::allocate_nvme(size, nvme).unwrap_or_else(|e| {
+    nvme.allocate::<u8>(size).unwrap_or_else(|e| {
         eprintln!("DMA allocation failed: {}", e);
         process::exit(1);
     })

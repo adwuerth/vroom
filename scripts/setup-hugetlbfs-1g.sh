@@ -1,7 +1,7 @@
 #!/bin/bash
 
-mkdir -p /mnt/huge1G
-(mount | grep /mnt/huge1G) > /dev/null || mount -t hugetlbfs hugetlbfs /mnt/huge1G
+mkdir -p /mnt/huge
+(mount | grep /mnt/huge) > /dev/null || mount -t hugetlbfs hugetlbfs /mnt/huge
 for i in {0..7}
 do
 	if [[ -e "/sys/devices/system/node/node$i" ]]

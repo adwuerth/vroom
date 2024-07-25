@@ -8,6 +8,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
 use std::{env, process, vec};
+use vroom::QUEUE_LENGTH;
 use vroom::{memory::*, Mapping};
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -37,6 +38,14 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let queue_depth = match args.next() {
+        Some(arg) => arg.parse::<usize>()?,
+        None => {
+            eprintln!("no qd");
+            process::exit(1);
+        }
+    };
+
     let page_size = match page_size.as_str() {
         "4k" => Pagesize::Page4K,
         "2m" => Pagesize::Page2M,
@@ -52,9 +61,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let random = true;
     let write = true;
 
-    // const THRESHOLD: u128 = 10000000;
-
     let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
+
+    let mut qpair = nvme.create_io_queue_pair(QUEUE_LENGTH)?;
 
     // let dma = nvme.allocate::<u8>(page_size.size())?;
     // nvme.write(&dma, 0)?;
@@ -67,13 +76,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut lba = 0;
     let mut previous_dmas = vec![];
 
-    let split_mult = 1;
+    let split_size = 1;
 
-    let split_size = 1 * split_mult;
+    let dma_multiplier = PAGESIZE_4KIB;
 
-    let dma_mult = page_size.size();
+    let dma_size = alloc_size * dma_multiplier;
 
-    let dma_size = alloc_size * dma_mult;
+    println!("alloc done");
+
+    let mut latencies: Vec<u128> = vec![];
 
     let mut dma = nvme.allocate::<u8>(dma_size)?;
 
@@ -82,18 +93,14 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()[..];
     dma[0..dma_size].copy_from_slice(rand_block);
 
-    for i in 0..alloc_size / split_mult {
-        // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
-        //     .map(|_| rand::random::<u8>())
-        //     .collect::<Vec<_>>()[..];
-        // dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
-        previous_dmas.push(dma.slice(i * dma_mult..(i * dma_mult) + split_size));
+    for i in 0..alloc_size {
+        previous_dmas.push(dma.slice(i * dma_multiplier..(i * dma_multiplier) + split_size));
     }
 
-    println!("alloc done");
+    for _i in 0..64 {
+        let mut outstanding_ops = 0;
+        let before = Instant::now();
 
-    let mut latencies: Vec<u128> = vec![];
-    for _i in 0..512 {
         for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
@@ -101,17 +108,22 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 (lba + 1) % ns_blocks
             };
 
-            let before = Instant::now();
+            while qpair.quick_poll().is_some() {
+                outstanding_ops -= 1;
+            }
 
-            nvme.write(previous_dma, lba * blocks)?;
+            if outstanding_ops == queue_depth {
+                qpair.complete_io(1);
+                outstanding_ops -= 1;
+            }
 
-            let elapsed = before.elapsed();
-
-            latencies.push(elapsed.as_nanos());
+            qpair.submit_io(previous_dma, lba, write);
+            outstanding_ops += 1;
         }
-    }
 
-    // nvme.deallocate(dma)?;
+        let elapsed = before.elapsed();
+        latencies.push(elapsed.as_nanos() / alloc_size as u128);
+    }
 
     write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
     Ok(())

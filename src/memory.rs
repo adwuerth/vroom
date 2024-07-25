@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
 use std::slice;
 use std::str::FromStr;
 
-use crate::ioallocator::{Allocating, IOAllocator};
+use crate::mapping::Mapping;
 use crate::NvmeDevice;
 
 pub const SHIFT_4KIB: u32 = 12;
@@ -219,29 +219,5 @@ impl IndexMut<RangeFull> for Dma<u8> {
     fn index_mut(&mut self, _: RangeFull) -> &mut Self::Output {
         let len = self.size;
         &mut self[0..len]
-    }
-}
-
-impl<T> Dma<T> {
-    /// Allocates DMA Memory on a huge page using an `IOAllocator`
-    /// # Arguments
-    /// * `size` - The size of the memory to allocate
-    /// * `allocator` - The allocator to use
-    /// # Errors
-    // pub fn allocate(size: usize, allocator: &IOAllocator) -> Result<Self, Box<dyn Error>> {
-    //     println!("calling allocate with size: {size}");
-    //     allocator.allocate::<T>(size)
-    // }
-
-    /// Allocates DMA Memory on a huge page using a specific `NVMe` device
-    /// # Arguments
-    /// * `size` - The size of the memory to allocate
-    /// * `nvme` - The `NVMe` device to use
-    /// # Errors
-    pub fn allocate_nvme(size: usize, nvme: &NvmeDevice) -> Result<Self, Box<dyn Error>> {
-        // Self::allocate(size, &nvme.allocator)
-
-        println!("calling allocate with size: {size}");
-        nvme.allocate(size)
     }
 }

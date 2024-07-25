@@ -1,9 +1,14 @@
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
-#![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::similar_names,
+    clippy::module_name_repetitions
+)]
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_arm_hints))]
 #[allow(unused)]
 mod cmd;
-pub mod ioallocator;
+pub mod mapping;
 #[allow(dead_code)]
 pub mod memory;
 mod mmio;
@@ -26,8 +31,8 @@ pub use memory::PAGESIZE_1GIB;
 pub use memory::PAGESIZE_2MIB;
 pub use memory::PAGESIZE_4KIB;
 
-pub use ioallocator::Allocating;
-pub use ioallocator::IOAllocator;
+pub use mapping::Mapping;
+pub use mapping::MemoryMapping;
 
 pub use nvme::{NvmeDevice, NvmeQueuePair};
 use pci::{pci_open_resource_ro, read_hex, read_io32};
@@ -71,7 +76,7 @@ pub fn init_with_page_size(
         return Err(format!("device {pci_addr} is not a block device").into());
     }
 
-    let allocator = IOAllocator::init_with_page_size(pci_addr, page_size)?;
+    let allocator = MemoryMapping::init_with_page_size(pci_addr, page_size)?;
     let mut nvme = NvmeDevice::init(pci_addr, Box::new(allocator))?;
     nvme.identify_controller()?;
     let ns = nvme.identify_namespace_list(0);

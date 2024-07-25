@@ -1,5 +1,5 @@
 use crate::cmd::NvmeCommand;
-use crate::ioallocator::{Allocating, IOAllocator};
+use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::{Dma, DmaSlice, Pagesize};
 use crate::queues::{NvmeCompQueue, NvmeCompletion, NvmeSubQueue, QUEUE_LENGTH};
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
@@ -254,7 +254,7 @@ pub struct NvmeDevice {
     pub namespaces: HashMap<u32, NvmeNamespace>,
     pub stats: NvmeStats,
     q_id: u16,
-    pub allocator: Box<IOAllocator>,
+    pub allocator: Box<MemoryMapping>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -275,20 +275,25 @@ unsafe impl Send for NvmeDevice {}
 
 unsafe impl Sync for NvmeDevice {}
 
+const BUFFER_SIZE: usize = PAGESIZE_4KIB;
+
+// currently fixed
+const PRP_LIST_SIZE: usize = PAGESIZE_4KIB;
+
 #[allow(unused)]
 impl NvmeDevice {
     /// Initialises `NVMe` device
     /// # Arguments
     /// * `pci_addr` - pci address of the device
     /// # Errors
-    pub fn init(pci_addr: &str, allocator: Box<IOAllocator>) -> Result<Self, Box<dyn Error>> {
+    pub fn init(pci_addr: &str, allocator: Box<MemoryMapping>) -> Result<Self, Box<dyn Error>> {
         // let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
         // Map the device's resource0
         let (addr, len) = allocator.map_resource()?;
 
-        let buffer: Dma<u8> = allocator.allocate(PAGESIZE_4KIB)?;
-        let prp_list: Dma<[u64; 512]> = allocator.allocate(PAGESIZE_4KIB)?;
+        let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE)?;
+        let prp_list: Dma<[u64; 512]> = allocator.allocate(PRP_LIST_SIZE)?;
 
         let mut dev = Self {
             pci_addr: pci_addr.to_string(),
@@ -742,7 +747,6 @@ impl NvmeDevice {
         Ok(())
     }
 
-    #[inline(always)]
     fn namespace_io(&mut self, ns_id: u32, blocks: u64, lba: u64, addr: u64, write: bool) {
         assert!(blocks > 0);
         assert!(blocks <= 0x1_0000);
@@ -892,7 +896,7 @@ impl NvmeDevice {
     }
 }
 
-impl Allocating for NvmeDevice {
+impl Mapping for NvmeDevice {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
         self.allocator.allocate(size)
     }

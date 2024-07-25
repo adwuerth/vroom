@@ -1,4 +1,4 @@
-use crate::ioallocator::Allocating;
+use crate::mapping::Mapping;
 use crate::memory::{Dma, Pagesize};
 use crate::pci::{
     read_io16, write_io16, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET, INTERRUPT_DISABLE,
@@ -122,13 +122,9 @@ impl Mmio {
     }
 }
 
-impl Allocating for Mmio {
+impl Mapping for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
-        let size = if size % memory::PAGESIZE_2MIB != 0 {
-            ((size >> memory::SHIFT_2MIB) + 1) << memory::SHIFT_2MIB
-        } else {
-            size
-        };
+        let size = Pagesize::Page2M.shift_up(size);
 
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use std::{env, process, thread};
 use vroom::memory::*;
 use vroom::vfio::Vfio;
-use vroom::Allocating;
+use vroom::Mapping;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 pub fn main() -> Result<(), Box<dyn Error>> {

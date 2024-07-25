@@ -3,7 +3,7 @@ use std::error::Error;
 use vroom::memory::*;
 
 use std::{env, process};
-use vroom::Allocating;
+use vroom::Mapping;
 use vroom::NvmeDevice;
 
 pub fn main() -> Result<(), Box<dyn Error>> {

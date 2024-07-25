@@ -2,7 +2,7 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::{Dma, Pagesize};
-use vroom::{Allocating, PAGESIZE_4KIB};
+use vroom::{Mapping, PAGESIZE_4KIB};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();

@@ -3,7 +3,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread};
-use vroom::memory::*;
+use vroom::{memory::*, Mapping};
 
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
@@ -102,8 +102,8 @@ fn qd_n_multithread(
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
             let mut total = std::time::Duration::ZERO;
-            let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(PAGESIZE_2MIB, &nvme.lock().unwrap()).unwrap();
+
+            let mut buffer = nvme.lock().unwrap().allocate(PAGESIZE_2MIB).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -200,7 +200,7 @@ fn qd_1_singlethread(
     random: bool,
     duration: Duration,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_2MIB, &nvme)?;
+    let mut buffer = nvme.allocate(PAGESIZE_2MIB)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;

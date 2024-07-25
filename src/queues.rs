@@ -1,5 +1,5 @@
 use crate::cmd::NvmeCommand;
-use crate::ioallocator::{Allocating, IOAllocator};
+use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::Dma;
 use crate::PAGESIZE_2MIB;
 use std::error::Error;
@@ -44,7 +44,7 @@ pub struct NvmeSubQueue {
 
 impl NvmeSubQueue {
     pub fn new(
-        allocator: &IOAllocator,
+        allocator: &MemoryMapping,
         len: usize,
         doorbell: usize,
     ) -> Result<Self, Box<dyn Error>> {
@@ -105,7 +105,7 @@ pub struct NvmeCompQueue {
 // TODO: error handling
 impl NvmeCompQueue {
     pub fn new(
-        allocator: &IOAllocator,
+        allocator: &MemoryMapping,
         len: usize,
         doorbell: usize,
     ) -> Result<Self, Box<dyn Error>> {

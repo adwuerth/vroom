@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, process, thread, vec};
 use vroom::memory::*;
+use vroom::Mapping;
 
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
@@ -83,8 +84,8 @@ fn qd_n_multithread_latency_nanos(
         let handle = thread::spawn(move || {
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize;
-            let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(PAGESIZE_2MIB, &nvme.lock().unwrap()).unwrap();
+
+            let mut buffer = nvme.lock().unwrap().allocate::<u8>(PAGESIZE_2MIB).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -190,9 +191,8 @@ fn qd_n_multithread(
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize; // 4kib
             let mut total = std::time::Duration::ZERO;
-            let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(vroom::PAGESIZE_4KIB * queue_depth, &nvme.lock().unwrap())
-                    .unwrap();
+
+            let mut buffer = nvme.lock().unwrap().allocate(PAGESIZE_4KIB).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -280,7 +280,7 @@ fn qd_1_singlethread_latency(
     random: bool,
     duration: Duration,
 ) -> Result<(NvmeDevice, Vec<u128>), Box<dyn Error>> {
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(PAGESIZE_2MIB, &nvme)?;
+    let mut buffer = nvme.allocate(PAGESIZE_2MIB)?;
 
     let blocks = 8;
     let bytes = 512 * blocks;

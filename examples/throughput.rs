@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use std::{env, process, thread};
 use vroom::memory::*;
 use vroom::vfio::Vfio;
-use vroom::Allocating;
+use vroom::Mapping;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
@@ -102,10 +102,12 @@ fn qd_n_multithread(
             let mut rng = rand::thread_rng();
             let bytes = 512 * blocks as usize; // 4kib
             let mut total = std::time::Duration::ZERO;
-            let mut buffer: Dma<u8> =
-                Dma::allocate_nvme(vroom::PAGESIZE_4KIB * queue_depth, &nvme.lock().unwrap())
-                    .unwrap();
 
+            let mut buffer = nvme
+                .lock()
+                .unwrap()
+                .allocate(PAGESIZE_4KIB * queue_depth)
+                .unwrap();
             let mut qpair = nvme
                 .lock()
                 .unwrap()
@@ -195,7 +197,8 @@ fn qd_1_singlethread(
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1; // - blocks - 1;
 
     let mut rng = thread_rng();
-    let mut buffer: Dma<u8> = Dma::allocate_nvme(vroom::PAGESIZE_4KIB, &nvme)?;
+    let mut buffer = nvme.allocate(PAGESIZE_4KIB)?;
+
     let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
     buffer[..rand_block.len()].copy_from_slice(rand_block);
 
