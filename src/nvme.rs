@@ -2,9 +2,9 @@ use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::{Dma, DmaSlice, Pagesize};
 use crate::queues::{CompletionQueue, NvmeCompletion, SubmissionQueue, QUEUE_LENGTH};
+use crate::Result;
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
-use std::error::Error;
 use std::hint::spin_loop;
 
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -211,7 +211,7 @@ impl NvmeQueuePair {
 
     ///
     /// # Errors
-    pub fn quick_poll_result(&mut self) -> Result<Option<()>, std::io::Error> {
+    pub fn quick_poll_result(&mut self) -> Result<Option<()>> {
         if let Some((tail, c_entry, _)) = self.comp_queue.complete() {
             unsafe {
                 std::ptr::write_volatile(self.comp_queue.doorbell as *mut u32, tail as u32);
@@ -227,10 +227,7 @@ impl NvmeQueuePair {
                     c_entry
                 );
                 eprintln!("{error_message}");
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error_message,
-                ));
+                return Err(format!("Error: {error_message}",).into());
             }
             return Ok(Some(()));
         }
@@ -286,7 +283,7 @@ impl NvmeDevice {
     /// # Arguments
     /// * `pci_addr` - pci address of the device
     /// # Errors
-    pub fn init(pci_addr: &str, allocator: Box<MemoryMapping>) -> Result<Self, Box<dyn Error>> {
+    pub fn init(pci_addr: &str, allocator: Box<MemoryMapping>) -> Result<Self> {
         // let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
         // Map the device's resource0
@@ -402,7 +399,7 @@ impl NvmeDevice {
 
     /// Identify `NVMe` Controller
     /// # Errors    
-    pub fn identify_controller(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn identify_controller(&mut self) -> Result<()> {
         println!("Trying to identify controller");
         let _entry = self.submit_and_complete_admin(NvmeCommand::identify_controller);
 
@@ -447,7 +444,7 @@ impl NvmeDevice {
     ///
     /// # Panics
     /// # Errors
-    pub fn create_io_queue_pair(&mut self, len: usize) -> Result<NvmeQueuePair, Box<dyn Error>> {
+    pub fn create_io_queue_pair(&mut self, len: usize) -> Result<NvmeQueuePair> {
         let q_id = self.q_id;
         println!("Requesting i/o queue pair with id {q_id}");
 
@@ -487,7 +484,7 @@ impl NvmeDevice {
     }
 
     /// # Errors
-    pub fn delete_io_queue_pair(&mut self, qpair: &NvmeQueuePair) -> Result<(), Box<dyn Error>> {
+    pub fn delete_io_queue_pair(&mut self, qpair: &NvmeQueuePair) -> Result<()> {
         println!("Deleting i/o queue pair with id {}", qpair.id);
         self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::delete_io_submission_queue(c_id, qpair.id)
@@ -549,7 +546,7 @@ impl NvmeDevice {
 
     /// TODO: currently namespace 1 is hardcoded
     /// # Errors
-    pub fn write(&mut self, data: &impl DmaSlice, mut lba: u64) -> Result<(), Box<dyn Error>> {
+    pub fn write(&mut self, data: &impl DmaSlice, mut lba: u64) -> Result<()> {
         for chunk in data.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
             self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, true);
@@ -561,7 +558,7 @@ impl NvmeDevice {
 
     /// `NVMe` read to `DmaSlice`
     /// # Errors
-    pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<(), Box<dyn Error>> {
+    pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<()> {
         // let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
@@ -573,7 +570,7 @@ impl NvmeDevice {
 
     /// # Errors
     /// # Panics
-    pub fn write_copied(&mut self, data: &[u8], mut lba: u64) -> Result<(), Box<dyn Error>> {
+    pub fn write_copied(&mut self, data: &[u8], mut lba: u64) -> Result<()> {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in data.chunks(128 * 4096) {
             self.buffer[..chunk.len()].copy_from_slice(chunk);
@@ -587,7 +584,7 @@ impl NvmeDevice {
 
     /// # Errors
     /// # Panics
-    pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<(), Box<dyn Error>> {
+    pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<()> {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks_mut(128 * 4096) {
             let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
@@ -672,7 +669,7 @@ impl NvmeDevice {
         data: &[u8],
         mut lba: u64,
         batch_len: u64,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let ns = *self.namespaces.get(&ns_id).unwrap();
         let block_size = 512;
         let q_id = 1;
@@ -714,7 +711,7 @@ impl NvmeDevice {
         data: &mut [u8],
         mut lba: u64,
         batch_len: u64,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let ns = *self.namespaces.get(&ns_id).unwrap();
         let block_size = 512;
         let q_id = 1;
@@ -793,7 +790,7 @@ impl NvmeDevice {
     fn submit_and_complete_admin<F: FnOnce(u16, usize) -> NvmeCommand>(
         &mut self,
         cmd_init: F,
-    ) -> Result<NvmeCompletion, Box<dyn Error>> {
+    ) -> Result<NvmeCompletion> {
         let cid = self.admin_sq.tail;
         let tail = self.admin_sq.submit(cmd_init(cid as u16, self.buffer.phys));
         self.write_reg_idx(NvmeArrayRegs::SQyTDBL, 0, tail as u32);
@@ -897,15 +894,15 @@ impl NvmeDevice {
 }
 
 impl Mapping for NvmeDevice {
-    fn allocate<T>(&self, size: usize) -> Result<Dma<T>, Box<dyn Error>> {
+    fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
         self.allocator.allocate(size)
     }
 
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<(), Box<dyn Error>> {
+    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
         self.allocator.deallocate(dma)
     }
 
-    fn map_resource(&self) -> Result<(*mut u8, usize), Box<dyn Error>> {
+    fn map_resource(&self) -> Result<(*mut u8, usize)> {
         self.allocator.map_resource()
     }
 }

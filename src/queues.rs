@@ -1,10 +1,9 @@
 use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::Dma;
-use crate::PAGESIZE_2MIB;
-use std::error::Error;
+use crate::Result;
 use std::hint::spin_loop;
-use std::{array, mem, ptr};
+use std::mem;
 
 /// `NVMe` spec 4.6
 /// Completion queue entry
@@ -43,11 +42,7 @@ pub struct SubmissionQueue {
 }
 
 impl SubmissionQueue {
-    pub fn new(
-        allocator: &MemoryMapping,
-        len: usize,
-        doorbell: usize,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(allocator: &MemoryMapping, len: usize, doorbell: usize) -> Result<Self> {
         let commands = allocator.allocate(mem::size_of::<NvmeCommand>() * QUEUE_LENGTH)?;
 
         Ok(Self {
@@ -104,11 +99,7 @@ pub struct CompletionQueue {
 
 // TODO: error handling
 impl CompletionQueue {
-    pub fn new(
-        allocator: &MemoryMapping,
-        len: usize,
-        doorbell: usize,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(allocator: &MemoryMapping, len: usize, doorbell: usize) -> Result<Self> {
         let commands = allocator.allocate(mem::size_of::<NvmeCompletion>() * QUEUE_LENGTH)?;
         Ok(Self {
             commands,

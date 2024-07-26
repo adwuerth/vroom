@@ -8,6 +8,7 @@
 #![cfg_attr(target_arch = "aarch64", feature(stdarch_arm_hints))]
 #[allow(unused)]
 mod cmd;
+mod error;
 pub mod mapping;
 #[allow(dead_code)]
 pub mod memory;
@@ -21,9 +22,12 @@ mod queues;
 pub mod vfio;
 
 #[allow(dead_code, clippy::identity_op)]
-mod vfio_constants;
-
+// mod vfio_constants;
 mod vfio_structs;
+
+#[macro_use]
+mod macros;
+mod ioctl_op;
 
 use memory::Pagesize;
 use memory::DEFAULT_PAGE_SIZE;
@@ -37,7 +41,8 @@ pub use mapping::MemoryMapping;
 pub use nvme::{NvmeDevice, NvmeQueuePair};
 use pci::{pci_open_resource_ro, read_hex, read_io32};
 pub use queues::QUEUE_LENGTH;
-use std::error::Error;
+
+pub use error::{Error, Result};
 
 /// initialise driver
 /// # Arguments
@@ -46,7 +51,7 @@ use std::error::Error;
 /// Panics if the device cant be found
 /// # Errors
 /// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
-pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
+pub fn init(pci_addr: &str) -> Result<NvmeDevice> {
     init_with_page_size(pci_addr, DEFAULT_PAGE_SIZE)
 }
 
@@ -58,10 +63,7 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice, Box<dyn Error>> {
 /// Panics if the device cant be found
 /// # Errors
 /// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
-pub fn init_with_page_size(
-    pci_addr: &str,
-    page_size: Pagesize,
-) -> Result<NvmeDevice, Box<dyn Error>> {
+pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDevice> {
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
     let mut config_file = pci_open_resource_ro(pci_addr, "config").expect("wrong pci address");

@@ -1,11 +1,7 @@
-use std::error::Error;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeTo};
 use std::slice;
 use std::str::FromStr;
-
-use crate::mapping::Mapping;
-use crate::NvmeDevice;
 
 pub const SHIFT_4KIB: u32 = 12;
 pub const PAGESIZE_4KIB: usize = 1 << SHIFT_4KIB;
