@@ -56,6 +56,15 @@ impl Pagesize {
             _ => Self::Page2M,
         }
     }
+
+    #[must_use]
+    pub const fn mmap_flags(&self) -> i32 {
+        match self {
+            Self::Page4K => 0,
+            Self::Page2M => libc::MAP_HUGETLB | libc::MAP_HUGE_2MB,
+            Self::Page1G => libc::MAP_HUGETLB | libc::MAP_HUGE_1GB,
+        }
+    }
 }
 
 #[allow(clippy::match_same_arms)]

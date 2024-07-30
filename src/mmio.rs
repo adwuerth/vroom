@@ -1,5 +1,5 @@
 use crate::mapping::Mapping;
-use crate::memory::{Dma, Pagesize};
+use crate::memory::{self, Dma, Pagesize};
 use crate::pci::{
     read_io16, write_io16, BUS_MASTER_ENABLE_BIT, COMMAND_REGISTER_OFFSET, INTERRUPT_DISABLE,
 };
@@ -7,21 +7,36 @@ use std::io::Write;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{fs, io, mem, process, ptr};
+use std::{default, fs, io, mem, process, ptr};
 
 static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
-use crate::{mlock, Result};
+use crate::{mlock, munlock, munmap, Result};
 use crate::{mmap, mmap_fd, Error};
 
 pub struct Mmio {
     pci_addr: String,
+    page_size: Pagesize,
 }
 
 impl Mmio {
     pub fn init(pci_addr: &str) -> Result<Self> {
+        Self::init_with_args(pci_addr, memory::DEFAULT_PAGE_SIZE)
+    }
+
+    pub fn init_with_args(pci_addr: &str, page_size: Pagesize) -> Result<Self> {
         let pci_addr = pci_addr.to_string();
-        let mmio = Self { pci_addr };
+
+        if page_size == Pagesize::Page4K {
+            return Err(Error::Mmio(
+                "Pagesize 4K not supported for non-Vfio!".to_string(),
+            ));
+        }
+
+        let mmio = Self {
+            pci_addr,
+            page_size,
+        };
 
         // mmio.bind_to_stub_driver()?;
 
@@ -118,7 +133,7 @@ impl Mmio {
 
 impl Mapping for Mmio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
-        let size = Pagesize::Page2M.shift_up(size);
+        let size = self.page_size.shift_up(size);
 
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
@@ -139,7 +154,7 @@ impl Mapping for Mmio {
             }
         };
 
-        let ptr = mmap_fd!(size, libc::MAP_HUGETLB, file.as_raw_fd())?;
+        let ptr = mmap_fd!(size, self.page_size.mmap_flags(), file.as_raw_fd())?;
 
         mlock!(ptr, size)?;
 
@@ -168,6 +183,13 @@ impl Mapping for Mmio {
     }
 
     fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
-        todo!()
+        let addr = dma.virt.cast::<libc::c_void>();
+        let len = dma.size;
+
+        munlock!(addr, len)?;
+
+        munmap!(addr, len)?;
+
+        Ok(())
     }
 }

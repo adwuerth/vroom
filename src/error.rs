@@ -11,6 +11,7 @@ pub enum Error {
     Mmap { error: String, io_error: io::Error },
     Ioctl { error: String, io_error: io::Error },
     Vfio(String),
+    Mmio(String),
 }
 
 impl std::error::Error for Error {}
@@ -28,6 +29,7 @@ impl fmt::Display for Error {
                 write!(f, "Ioctl failed Error: {error} OS error: {io_error}")
             }
             Self::Vfio(error) => write!(f, "Vfio Error: {error}"),
+            Self::Mmio(error) => write!(f, "Mmio Error: {error}"),
         }
     }
 }

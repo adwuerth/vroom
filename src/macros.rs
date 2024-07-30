@@ -32,11 +32,26 @@ macro_rules! mmap {
         let ptr = unsafe { libc::mmap($addr, $len, $prot, $flags, $fd, $offset) };
         if ptr == libc::MAP_FAILED {
             Err(Error::Mmap {
-                error: (format!("Mmap with len {} failed", $len)),
+                error: (format!("mmap with len {} failed", $len)),
                 io_error: (std::io::Error::last_os_error()),
             })
         } else {
             Ok(ptr)
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! munmap {
+    ($addr:expr, $len:expr) => {{
+        let result = unsafe { libc::munmap($addr, $len) };
+        if result == -1 {
+            Err(Error::Mmap {
+                error: (format!("munmap with len {} failed", $len)),
+                io_error: (std::io::Error::last_os_error()),
+            })
+        } else {
+            Ok(result)
         }
     }};
 }
@@ -79,6 +94,18 @@ macro_rules! mmap_fd {
 macro_rules! mlock {
     ($addr:expr, $len:expr) => {{
         let result = unsafe { libc::mlock($addr, $len) };
+        if result == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result)
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! munlock {
+    ($addr:expr, $len:expr) => {{
+        let result = unsafe { libc::munlock($addr, $len) };
         if result == -1 {
             Err(std::io::Error::last_os_error())
         } else {
