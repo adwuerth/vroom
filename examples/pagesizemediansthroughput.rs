@@ -99,12 +99,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     //     previous_dmas.push(dma.slice(i * PAGESIZE_4KIB..(i * PAGESIZE_4KIB) + 1));
     // }
 
-    let split_size = 4096;
+    let split_size = 512;
 
-    let bytes_len = 4096;
+    let bytes_len = 1;
 
     for i in 0..dma_size / split_size {
-        previous_dmas.push(dma.slice(i * split_size..(i * split_size) + 4096));
+        previous_dmas.push(dma.slice(i * split_size..(i * split_size) + bytes_len));
     }
     for _ in 0..reps {
         println!("calling allocate with dma_size {dma_size}");
@@ -123,7 +123,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 let before = Instant::now();
 
                 nvme.write(previous_dma, lba)?;
-                nvme.read(previous_dma, lba)?;
+                // nvme.read(previous_dma, lba)?;
 
                 let elapsed = before.elapsed();
 

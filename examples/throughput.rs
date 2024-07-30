@@ -42,11 +42,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut nvme = vroom::init_with_page_size(&pci_addr, page_size)?;
 
     let random = true;
-    let write = false;
+    let write = true;
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write)?;
+    let nvme = test_throughput_random(nvme, 512, 32, duration, random, write)?;
 
     Ok(())
 }

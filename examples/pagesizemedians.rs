@@ -50,7 +50,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // CONFIG
     //nvme
     let random = true;
-    let write = false;
+    let write = true;
 
     // const THRESHOLD: u128 = 10000000;
 
@@ -67,9 +67,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut lba = 0;
     let mut previous_dmas = vec![];
 
-    let split_mult = 1;
-
-    let split_size = 1 * split_mult;
+    let split_size = 1;
 
     let dma_mult = page_size.size();
 
@@ -82,7 +80,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()[..];
     dma[0..dma_size].copy_from_slice(rand_block);
 
-    for i in 0..alloc_size / split_mult {
+    for i in 0..alloc_size {
         // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
         //     .map(|_| rand::random::<u8>())
         //     .collect::<Vec<_>>()[..];
@@ -105,7 +103,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
             let before = Instant::now();
 
-            nvme.read(previous_dma, lba * blocks)?;
+            nvme.write(previous_dma, lba * blocks)?;
 
             let elapsed = before.elapsed();
 

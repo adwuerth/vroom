@@ -1,15 +1,17 @@
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::error::Error;
+use std::fs::File;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, process, thread};
+use std::{env, process, thread, vec};
 use vroom::memory::*;
 use vroom::vfio::Vfio;
 use vroom::Mapping;
 use vroom::{NvmeDevice, QUEUE_LENGTH};
 
+use std::io::Write;
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
     args.next();
@@ -40,22 +42,73 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let duration = duration.unwrap();
 
-    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size)?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
 
     let random = true;
     let write = true;
 
-    // fill_ns(&mut nvme);
+    let mut medians = vec![];
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 64)?;
+    // let (nvme, median) = test_throughput_random(nvme, 1, 1, duration, random, write, 65536)?;
+    // medians.push(median);
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 128)?;
+    // let (nvme, median) = test_throughput_random(nvme, 1, 4, duration, random, write, 65536)?;
+    // medians.push(median);
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 256)?;
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 65536)?;
+    // medians.push(median);
 
-    // let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 2 * 512)?;
+    // let (nvme, median) = test_throughput_random(nvme, 1, 32, duration, random, write, 65536)?;
+    // medians.push(median);
 
-    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 512)?;
+    // let (nvme, median) = test_throughput_random(nvme, 1, 64, duration, random, write, 65536)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 128, duration, random, write, 65536)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 16)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 64)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 128)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 256)?;
+    // medians.push(median);
+
+    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 512)?;
+    medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 1024)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 2048)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 4096)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 8192)?;
+    // medians.push(median);
+
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 16384)?;
+    // medians.push(median);
+
+    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
+    medians.push(median);
+    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
+    medians.push(median);
+    let mut file = File::create(format!("qd1lats_{}.txt", page_size))?;
+    for lat in medians {
+        writeln!(file, "{}", lat)?;
+    }
+
     Ok(())
 }
 
@@ -67,7 +120,7 @@ fn test_throughput_random(
     random: bool,
     write: bool,
     ps4k_alloc: usize,
-) -> Result<NvmeDevice, Box<dyn Error>> {
+) -> Result<(NvmeDevice, u128), Box<dyn Error>> {
     println!();
     println!("---------------------------------------------------------------");
     println!();
@@ -76,26 +129,159 @@ fn test_throughput_random(
         if write { "write" } else { "read" }
     );
 
-    let nvme = if queue_depth == 1 && thread_count == 1 {
-        qd_1_singlethread(nvme, write, random, duration)?
-    } else {
-        qd_n_multithread(
-            nvme,
-            queue_depth,
-            thread_count,
-            duration,
-            random,
-            write,
-            ps4k_alloc,
-        )?
-    };
+    // let nvme = if queue_depth == 1 && thread_count == 1 {
+    //     qd_1_singlethread(nvme, write, random, duration)?
+    // } else {
+    //     // qd_n_multithread_alloconce(
+    //     //     nvme,
+    //     //     queue_depth,
+    //     //     thread_count,
+    //     //     duration,
+    //     //     random,
+    //     //     write,
+    //     //     ps4k_alloc,
+    //     // )?
+
+    let res = qd_1_multithread(
+        nvme,
+        queue_depth,
+        thread_count,
+        duration,
+        random,
+        write,
+        ps4k_alloc,
+    )?;
+    // };
 
     println!(
         "Tested QD{queue_depth} {} with {thread_count} threads.",
         if write { "write" } else { "read" }
     );
 
-    Ok(nvme)
+    Ok(res)
+}
+
+fn qd_1_multithread(
+    nvme: NvmeDevice,
+    queue_depth: usize,
+    thread_count: u64,
+    duration: Duration,
+    random: bool,
+    write: bool,
+    ps4k_alloc: usize,
+) -> Result<(NvmeDevice, u128), Box<dyn Error>> {
+    let blocks = 8;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
+
+    let nvme = Arc::new(Mutex::new(nvme));
+    let mut threads = Vec::new();
+
+    for _ in 0..thread_count {
+        let nvme = Arc::clone(&nvme);
+
+        let handle = thread::spawn(move || -> (u64, f64, Vec<u128>) {
+            let mut rng = rand::thread_rng();
+            let bytes = 512 * blocks as usize; // 4kib
+            let mut total = std::time::Duration::ZERO;
+
+            let buffer_size = PAGESIZE_4KIB * ps4k_alloc;
+
+            let mut buffer = nvme.lock().unwrap().allocate::<u8>(buffer_size).unwrap();
+
+            let mut qpair = nvme
+                .lock()
+                .unwrap()
+                .create_io_queue_pair(QUEUE_LENGTH)
+                .unwrap();
+
+            let rand_block = &(0..buffer_size)
+                .map(|_| rand::random::<u8>())
+                .collect::<Vec<_>>()[..];
+            buffer[0..buffer_size].copy_from_slice(rand_block);
+
+            let mut buffer_slices = vec![];
+            for i in 0..ps4k_alloc {
+                buffer_slices.push(buffer.slice(i * PAGESIZE_4KIB..(i + 1) * PAGESIZE_4KIB));
+            }
+            let mut buffer_slices_it = buffer_slices.iter().cycle();
+
+            let mut outstanding_ops = 0;
+            let mut total_io_ops = 0;
+            let lba = 0;
+
+            let mut latencies = vec![];
+
+            while total < duration {
+                // let lba = rng.gen_range(range.0..range.1);
+                let lba = if random {
+                    rng.gen_range(0..ns_blocks)
+                } else {
+                    (lba + 1) % ns_blocks
+                };
+                let before = Instant::now();
+
+                qpair.submit_io(buffer_slices_it.next().unwrap(), lba * blocks, write);
+                qpair.complete_io(1);
+
+                let elapsed = before.elapsed();
+                total += elapsed;
+                total_io_ops += 1;
+                latencies.push(elapsed.as_nanos());
+            }
+
+            total_io_ops += outstanding_ops as u64;
+            assert!(qpair.sub_queue.is_empty());
+            nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
+            nvme.lock().unwrap().deallocate(buffer).unwrap();
+
+            (
+                total_io_ops,
+                total_io_ops as f64 / total.as_secs_f64(),
+                latencies,
+            )
+        });
+        threads.push(handle);
+    }
+
+    let total = threads.into_iter().fold(
+        (0, 0., vec![]),
+        |mut acc: (u64, f64, Vec<u128>), thread: thread::JoinHandle<(u64, f64, Vec<u128>)>| {
+            let res = thread
+                .join()
+                .expect("The thread creation or execution failed!");
+            acc.2.extend(res.2);
+            (acc.0 + res.0, acc.1 + res.1, acc.2)
+        },
+    );
+
+    let median = median(total.2).unwrap();
+    println!("median: {median}");
+
+    println!(
+        "n: {}, total {} iops: {:?}",
+        total.0,
+        if write { "write" } else { "read" },
+        total.1
+    );
+    match Arc::try_unwrap(nvme) {
+        Ok(mutex) => match mutex.into_inner() {
+            Ok(t) => Ok((t, median)),
+            Err(e) => Err(e.into()),
+        },
+        Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
+    }
+}
+fn median(mut latencies: Vec<u128>) -> Option<u128> {
+    let len = latencies.len();
+    if len == 0 {
+        return None;
+    }
+    latencies.sort_unstable();
+    if len % 2 == 1 {
+        Some(latencies[len / 2])
+    } else {
+        Some((latencies[len / 2 - 1] + latencies[len / 2]) / 2)
+    }
 }
 
 fn qd_n_multithread(
@@ -162,8 +348,7 @@ fn qd_n_multithread(
                     outstanding_ops -= 1;
                     total_io_ops += 1;
                 }
-                let submitted =
-                    qpair.submit_io(buffer_slices_it.next().unwrap(), lba * blocks, write);
+                qpair.submit_io(buffer_slices_it.next().unwrap(), lba * blocks, write);
                 total += before.elapsed();
                 outstanding_ops += 1;
             }
@@ -195,6 +380,120 @@ fn qd_n_multithread(
         if write { "write" } else { "read" },
         total.1
     );
+    match Arc::try_unwrap(nvme) {
+        Ok(mutex) => match mutex.into_inner() {
+            Ok(t) => Ok(t),
+            Err(e) => Err(e.into()),
+        },
+        Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
+    }
+}
+
+fn qd_n_multithread_alloconce(
+    nvme: NvmeDevice,
+    queue_depth: usize,
+    thread_count: u64,
+    duration: Duration,
+    random: bool,
+    write: bool,
+    ps4k_alloc: usize,
+) -> Result<NvmeDevice, Box<dyn Error>> {
+    let blocks = 8;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
+
+    let nvme = Arc::new(Mutex::new(nvme));
+
+    // Allocate buffer once and divide it into chunks
+    let buffer_size = PAGESIZE_4KIB * ps4k_alloc;
+    let mut buffer = {
+        let nvme = nvme.lock().unwrap();
+        nvme.allocate::<u8>(buffer_size)?
+    };
+    let rand_block: Vec<u8> = (0..buffer_size).map(|_| rand::random::<u8>()).collect();
+    buffer[0..buffer_size].copy_from_slice(&rand_block);
+
+    // Create slices of the buffer
+    let mut buffer_slices = vec![];
+    for i in 0..ps4k_alloc {
+        buffer_slices.push(buffer.slice(i * PAGESIZE_4KIB..(i + 1) * PAGESIZE_4KIB));
+    }
+
+    let buffer_slices = Arc::new(buffer_slices);
+    let mut threads = Vec::new();
+
+    for _ in 0..thread_count {
+        let nvme = Arc::clone(&nvme);
+        let buffer_slices = Arc::clone(&buffer_slices);
+
+        let handle = thread::spawn(move || -> (u64, f64) {
+            let mut rng = rand::thread_rng();
+            let mut total = Duration::ZERO;
+
+            let mut qpair = nvme
+                .lock()
+                .unwrap()
+                .create_io_queue_pair(QUEUE_LENGTH)
+                .unwrap();
+
+            let mut buffer_slices_it = buffer_slices.iter().cycle();
+
+            let mut outstanding_ops = 0;
+            let mut total_io_ops = 0;
+            let mut lba = 0;
+
+            while total < duration {
+                lba = if random {
+                    rng.gen_range(0..ns_blocks)
+                } else {
+                    (lba + 1) % ns_blocks
+                };
+
+                let before = Instant::now();
+                while qpair.quick_poll().is_some() {
+                    outstanding_ops -= 1;
+                    total_io_ops += 1;
+                }
+                if outstanding_ops == queue_depth {
+                    qpair.complete_io(1);
+                    outstanding_ops -= 1;
+                    total_io_ops += 1;
+                }
+
+                qpair.submit_io(buffer_slices_it.next().unwrap(), lba * blocks, write);
+                total += before.elapsed();
+                outstanding_ops += 1;
+            }
+
+            if outstanding_ops != 0 {
+                let before = Instant::now();
+                qpair.complete_io(outstanding_ops);
+                total += before.elapsed();
+            }
+
+            total_io_ops += outstanding_ops as u64;
+            assert!(qpair.sub_queue.is_empty());
+            nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
+
+            (total_io_ops, total_io_ops as f64 / total.as_secs_f64())
+        });
+
+        threads.push(handle);
+    }
+
+    let total = threads.into_iter().fold((0, 0.0), |acc, thread| {
+        let res = thread
+            .join()
+            .expect("The thread creation or execution failed!");
+        (acc.0 + res.0, acc.1 + res.1)
+    });
+
+    println!(
+        "n: {}, total {} iops: {:.2}",
+        total.0,
+        if write { "write" } else { "read" },
+        total.1
+    );
+
     match Arc::try_unwrap(nvme) {
         Ok(mutex) => match mutex.into_inner() {
             Ok(t) => Ok(t),

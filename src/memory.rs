@@ -83,6 +83,10 @@ impl Display for Pagesize {
     }
 }
 
+unsafe impl<T> Send for Dma<T> {}
+
+unsafe impl<T> Sync for Dma<T> {}
+
 #[derive(Debug)]
 pub struct Dma<T> {
     pub virt: *mut T,

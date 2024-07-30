@@ -76,7 +76,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut lba = 0;
     let mut previous_dmas = vec![];
 
-    let split_size = 1;
+    let split_size = PAGESIZE_4KIB;
 
     let dma_multiplier = PAGESIZE_4KIB;
 
@@ -93,13 +93,14 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()[..];
     dma[0..dma_size].copy_from_slice(rand_block);
 
-    for i in 0..alloc_size {
-        previous_dmas.push(dma.slice(i * dma_multiplier..(i * dma_multiplier) + split_size));
+    let unit_size = PAGESIZE_4KIB;
+
+    for i in 0..dma_size / unit_size {
+        previous_dmas.push(dma.slice(i * unit_size..(i * unit_size) + split_size));
     }
 
-    for _i in 0..64 {
+    for _i in 0..256 {
         let mut outstanding_ops = 0;
-        let before = Instant::now();
 
         for previous_dma in &previous_dmas {
             lba = if random {
@@ -107,25 +108,18 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             } else {
                 (lba + 1) % ns_blocks
             };
-
-            while qpair.quick_poll().is_some() {
-                outstanding_ops -= 1;
-            }
-
-            if outstanding_ops == queue_depth {
-                qpair.complete_io(1);
-                outstanding_ops -= 1;
-            }
-
+            let before = Instant::now();
             qpair.submit_io(previous_dma, lba, write);
+            qpair.complete_io(1);
+            let elapsed = before.elapsed();
             outstanding_ops += 1;
+            latencies.push(elapsed.as_nanos() as u128 as u128);
         }
 
-        let elapsed = before.elapsed();
-        latencies.push(elapsed.as_nanos() / alloc_size as u128);
+        println!("current median: {}", median(latencies.clone()).unwrap());
     }
 
-    write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
+    // write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
     Ok(())
 }
 
@@ -148,4 +142,16 @@ fn write_nanos_to_file(
         writeln!(file, "{}", lat)?;
     }
     Ok(())
+}
+fn median(mut latencies: Vec<u128>) -> Option<u128> {
+    let len = latencies.len();
+    if len == 0 {
+        return None;
+    }
+    latencies.sort_unstable();
+    if len % 2 == 1 {
+        Some(latencies[len / 2])
+    } else {
+        Some((latencies[len / 2 - 1] + latencies[len / 2]) / 2)
+    }
 }
