@@ -6,6 +6,7 @@ use crate::Result;
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::hint::spin_loop;
+use std::time::{Duration, Instant};
 
 #[allow(unused, clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug)]
@@ -96,6 +97,8 @@ pub struct NvmeQueuePair {
     comp_queue: CompletionQueue,
 }
 
+unsafe impl Send for NvmeQueuePair {}
+
 impl NvmeQueuePair {
     /// returns amount of requests pushed into submission queue
     pub fn submit_io(&mut self, data: &impl DmaSlice, mut lba: u64, write: bool) -> usize {
@@ -136,6 +139,7 @@ impl NvmeQueuePair {
                     std::ptr::write_volatile(self.sub_queue.doorbell as *mut u32, tail as u32);
                 }
             } else {
+                eprintln!("error: {entry:?}");
                 eprintln!("queue full");
                 return reqs;
             }
@@ -446,7 +450,7 @@ impl NvmeDevice {
     /// # Errors
     pub fn create_io_queue_pair(&mut self, len: usize) -> Result<NvmeQueuePair> {
         let q_id = self.q_id;
-        println!("Requesting i/o queue pair with id {q_id}");
+        // println!("Requesting i/o queue pair with id {q_id}");
 
         let offset = 0x1000 + ((4 << self.dstrd) * (2 * q_id + 1) as usize);
         assert!(offset <= self.len - 4, "SQ doorbell offset out of bounds");
@@ -556,6 +560,77 @@ impl NvmeDevice {
         Ok(())
     }
 
+    /// TODO: currently namespace 1 is hardcoded
+    /// # Errors
+    pub fn write_prp(
+        &mut self,
+        data: &impl DmaSlice,
+        mut lba: u64,
+        write: bool,
+    ) -> Result<Duration> {
+        let mut total = Duration::ZERO;
+        for chunk in data.chunks(128 * 4096) {
+            let chunk_len = chunk.slice.len();
+            let prp_pages = chunk_len / PAGESIZE_4KIB;
+            // println!("received {} prp pages", prp_pages);
+
+            for i in 0..prp_pages {
+                self.prp_list[i] = (chunk.phys_addr + i * 4096) as u64;
+            }
+
+            let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
+            let start = Instant::now();
+            self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, write);
+            let elapsed = start.elapsed();
+            total += elapsed;
+
+            println!("latency each: {}", elapsed.as_nanos() / prp_pages as u128);
+
+            lba += blocks;
+        }
+
+        Ok(total)
+    }
+
+    pub fn write_prp_raw(
+        &mut self,
+        own_prp: Vec<usize>,
+        mut lba: u64,
+        write: bool,
+    ) -> Result<Duration> {
+        let mut total = Duration::ZERO;
+
+        let len = own_prp.len();
+
+        // println!("submitting own_prp: {:#?}", own_prp);
+        // println!("received {} prp pages", prp_pages);
+
+        let mut i = 0;
+        for entry in &own_prp {
+            self.prp_list[i] = *entry as u64;
+        }
+
+        let byte_len = PAGESIZE_4KIB * len;
+
+        let blocks = (byte_len as u64 + 512 - 1) / 512;
+        let start = Instant::now();
+        self.namespace_io(
+            1,
+            blocks,
+            lba,
+            own_prp.into_iter().nth(0).unwrap() as u64,
+            write,
+        );
+        let elapsed = start.elapsed();
+        total += elapsed;
+
+        // println!("latency each: {}", total as u128 / len as u128);
+
+        lba += blocks;
+
+        Ok(total)
+    }
+
     /// `NVMe` read to `DmaSlice`
     /// # Errors
     pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<()> {
@@ -582,6 +657,24 @@ impl NvmeDevice {
         Ok(())
     }
 
+    /// # Errors
+    /// # Panics
+    pub fn write_copied_timed(&mut self, data: &[u8], mut lba: u64) -> Result<Duration> {
+        let ns = *self.namespaces.get(&1).unwrap();
+        let mut total_time = Duration::ZERO;
+        for chunk in data.chunks(128 * 4096) {
+            self.buffer[..chunk.len()].copy_from_slice(chunk);
+            let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
+            let start = Instant::now();
+            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, true);
+            let elapsed = start.elapsed();
+            total_time += elapsed;
+
+            lba += blocks;
+        }
+
+        Ok(total_time)
+    }
     /// # Errors
     /// # Panics
     pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<()> {
@@ -757,7 +850,7 @@ impl NvmeDevice {
             // self.buffer.phys as u64 + 4096 // self.page_size
             addr + 4096 // self.page_size
         } else {
-            self.prp_list.phys as u64
+            self.prp_list.phys as u64 + 8
         };
 
         let entry = if write {

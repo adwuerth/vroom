@@ -47,31 +47,28 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    let duration = match args.next() {
+        Some(secs) => Duration::from_secs(
+            secs.parse()
+                .expect("Usage: cargo run --example init <pci bus id> <duration in seconds>"),
+        ),
+        None => process::exit(1),
+    };
+
     // CONFIG
     //nvme
     let random = true;
-    let write = false;
-
-    // const THRESHOLD: u128 = 10000000;
+    let write = true;
 
     let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
 
-    // let dma = nvme.allocate::<u8>(page_size.size())?;
-    // nvme.write(&dma, 0)?;
-    // nvme.deallocate(dma)?;
-
-    // nvme.set_page_size(page_size.clone());
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
     let mut rng = rand::thread_rng();
     let mut lba = 0;
     let mut previous_dmas = vec![];
 
-    let split_mult = 1;
-
-    let split_size = 1 * split_mult;
-
-    let dma_mult = page_size.size();
+    let dma_mult = PAGESIZE_4KIB;
 
     let dma_size = alloc_size * dma_mult;
 
@@ -82,20 +79,31 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>()[..];
     dma[0..dma_size].copy_from_slice(rand_block);
 
-    for i in 0..alloc_size / split_mult {
-        // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
-        //     .map(|_| rand::random::<u8>())
-        //     .collect::<Vec<_>>()[..];
-        // dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
-        previous_dmas.push(dma.slice(i * dma_mult..(i * dma_mult) + split_size));
+    // for i in 0..alloc_size / split_mult {
+    //     // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
+    //     //     .map(|_| rand::random::<u8>())
+    //     //     .collect::<Vec<_>>()[..];
+    //     // dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
+    //     previous_dmas.push(dma.slice(i * dma_mult..(i * dma_mult) + split_size));
+    // }
+
+    let unit_size = PAGESIZE_4KIB;
+
+    // for i in 0..dma_size / unit_size {
+    //     previous_dmas.push(dma.slice(i * unit_size..(i + 1) * unit_size));
+    // }
+    for i in 0..dma_size / unit_size {
+        previous_dmas.push(dma.slice(i * unit_size..(i * unit_size) + 1));
     }
 
     println!("alloc done");
 
     let mut total = Duration::ZERO;
 
+    let mut ios = 0;
+
     let mut latencies: Vec<u128> = vec![];
-    for _i in 0..512 {
+    while total < duration {
         for previous_dma in &previous_dmas {
             lba = if random {
                 rng.gen_range(0..ns_blocks)
@@ -105,13 +113,18 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
             let before = Instant::now();
 
-            nvme.read(previous_dma, lba * blocks)?;
+            nvme.write(previous_dma, lba * blocks)?;
 
             let elapsed = before.elapsed();
 
             total += elapsed;
+            ios += 1;
 
             latencies.push(elapsed.as_nanos());
+
+            if total > duration {
+                break;
+            }
         }
     }
 
@@ -122,33 +135,37 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         total.as_micros() / previous_dmas.len() as u128,
         median
     );
+    let iops = ios as f64 / total.as_secs_f64();
+    write_latency(&page_size, &duration, dma_size, 1, 1, median, iops);
 
     // nvme.deallocate(dma)?;
 
-    write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
+    write_nanos_to_file(latencies, write, &page_size, alloc_size, "")?;
     Ok(())
 }
 
-fn write_nanos_to_file(
-    latencies: Vec<u128>,
-    write: bool,
+fn write_latency(
     page_size: &Pagesize,
-    buffer_mult: usize,
-    second_run: bool,
-    extra_param: &str,
-) -> Result<(), Box<dyn Error>> {
-    const IOMMU: &str = "vfio";
-    let mut file = File::create(format!(
-        "latency_intmap_{}_{}ps_{buffer_mult}_{IOMMU}_{}_{extra_param}.txt",
-        if write { "write" } else { "read" },
+    duration: &Duration,
+    dma_size: usize,
+    queue_depth: usize,
+    thread_count: usize,
+    latency: u128,
+    iops: f64,
+) {
+    let fname = format!(
+        "write_{}_qd{queue_depth}_t{thread_count}_{}s_{dma_size}alloc",
         page_size,
-        if second_run { "second" } else { "first" },
-    ))?;
-    for lat in latencies {
-        writeln!(file, "{}", lat)?;
-    }
-    Ok(())
+        duration.as_secs()
+    );
+
+    let mut file = File::create(fname).unwrap();
+
+    writeln!(file, "{}", latency).unwrap();
+
+    writeln!(file, "{}", iops).unwrap();
 }
+
 fn median(mut latencies: Vec<u128>) -> Option<u128> {
     let len = latencies.len();
     if len == 0 {
@@ -160,4 +177,23 @@ fn median(mut latencies: Vec<u128>) -> Option<u128> {
     } else {
         Some((latencies[len / 2 - 1] + latencies[len / 2]) / 2)
     }
+}
+
+fn write_nanos_to_file(
+    latencies: Vec<u128>,
+    write: bool,
+    page_size: &Pagesize,
+    buffer_mult: usize,
+    extra_param: &str,
+) -> Result<(), Box<dyn Error>> {
+    const IOMMU: &str = "vfio";
+    let mut file = File::create(format!(
+        "latenciesqd1t1_{}_{}ps_{buffer_mult}_{IOMMU}_{extra_param}.txt",
+        if write { "write" } else { "read" },
+        page_size,
+    ))?;
+    for lat in latencies {
+        writeln!(file, "{}", lat)?;
+    }
+    Ok(())
 }

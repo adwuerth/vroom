@@ -51,10 +51,10 @@ impl Mmio {
         file.write_all(self.pci_addr.as_bytes())?;
         println!("unbound driver");
 
-        let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
-        let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
-        file.write_all(nvme_vd.as_bytes())?;
-        println!("set new id");
+        // let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
+        // let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
+        // file.write_all(nvme_vd.as_bytes())?;
+        // println!("set new id");
 
         let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
         let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;

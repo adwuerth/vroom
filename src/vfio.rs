@@ -581,7 +581,7 @@ impl Display for Vfio {
 impl Mapping for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
         let size = self.page_size.shift_up(size);
-        println!("Allocating {} with page_size {}", size, self.page_size);
+        // println!("Allocating {} with page_size {}", size, self.page_size);
         let ptr = self.allocate_with_pagesize(size)?;
         self.map_dma(ptr, size)
     }

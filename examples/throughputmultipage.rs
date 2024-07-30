@@ -31,27 +31,71 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let page_size = match args.next() {
-        Some(arg) => arg,
+        Some(arg) => Pagesize::from_str(&arg)?,
         None => {
             eprintln!("Usage: cargo run --example init <pci bus id> <page size>");
             process::exit(1);
         }
     };
 
-    let page_size = Pagesize::from_str(page_size.as_str())?;
-
     let duration = duration.unwrap();
 
-    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, page_size)?;
 
     let random = true;
     let write = true;
 
     // fill_ns(&mut nvme);
 
-    let nvme = qd_n_multithread(nvme, 32, 4, duration, random, write);
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 64)?;
 
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 128)?;
+
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 256)?;
+
+    // let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 2 * 512)?;
+
+    let nvme = test_throughput_random(nvme, 32, 4, duration, random, write, 512)?;
     Ok(())
+}
+
+fn test_throughput_random(
+    nvme: NvmeDevice,
+    queue_depth: usize,
+    thread_count: u64,
+    duration: Duration,
+    random: bool,
+    write: bool,
+    ps4k_alloc: usize,
+) -> Result<NvmeDevice, Box<dyn Error>> {
+    println!();
+    println!("---------------------------------------------------------------");
+    println!();
+    println!(
+        "Now testing QD{queue_depth} {} with {thread_count} threads.",
+        if write { "write" } else { "read" }
+    );
+
+    let nvme = if queue_depth == 1 && thread_count == 1 {
+        qd_1_singlethread(nvme, write, random, duration)?
+    } else {
+        qd_n_multithread(
+            nvme,
+            queue_depth,
+            thread_count,
+            duration,
+            random,
+            write,
+            ps4k_alloc,
+        )?
+    };
+
+    println!(
+        "Tested QD{queue_depth} {} with {thread_count} threads.",
+        if write { "write" } else { "read" }
+    );
+
+    Ok(nvme)
 }
 
 fn qd_n_multithread(
@@ -61,6 +105,7 @@ fn qd_n_multithread(
     duration: Duration,
     random: bool,
     write: bool,
+    ps4k_alloc: usize,
 ) -> Result<NvmeDevice, Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
@@ -73,7 +118,12 @@ fn qd_n_multithread(
 
         let handle = thread::spawn(move || -> (u64, f64) {
             let mut rng = rand::thread_rng();
+            let bytes = 512 * blocks as usize; // 4kib
             let mut total = std::time::Duration::ZERO;
+
+            let buffer_size = PAGESIZE_4KIB * ps4k_alloc;
+
+            let mut buffer = nvme.lock().unwrap().allocate::<u8>(buffer_size).unwrap();
 
             let mut qpair = nvme
                 .lock()
@@ -81,21 +131,16 @@ fn qd_n_multithread(
                 .create_io_queue_pair(QUEUE_LENGTH)
                 .unwrap();
 
-            const BUFFER_SIZE: usize = PAGESIZE_2MIB * 128;
-            const UNIT: usize = PAGESIZE_4KIB;
-
-            let mut buffer = nvme.lock().unwrap().allocate::<u8>(BUFFER_SIZE).unwrap();
-
-            let mut dmas = vec![];
-
-            let rand_block = &(0..BUFFER_SIZE)
+            let rand_block = &(0..buffer_size)
                 .map(|_| rand::random::<u8>())
                 .collect::<Vec<_>>()[..];
-            buffer[0..BUFFER_SIZE].copy_from_slice(rand_block);
+            buffer[0..buffer_size].copy_from_slice(rand_block);
 
-            for i in 0..(BUFFER_SIZE / UNIT) - 1 {
-                dmas.push(buffer.slice(i * UNIT..(i + 1) * UNIT));
+            let mut buffer_slices = vec![];
+            for i in 0..ps4k_alloc {
+                buffer_slices.push(buffer.slice(i * PAGESIZE_4KIB..(i + 1) * PAGESIZE_4KIB));
             }
+            let mut buffer_slices_it = buffer_slices.iter().cycle();
 
             let mut outstanding_ops = 0;
             let mut total_io_ops = 0;
@@ -117,14 +162,10 @@ fn qd_n_multithread(
                     outstanding_ops -= 1;
                     total_io_ops += 1;
                 }
-                let submitted_ops = qpair.submit_io(
-                    dmas.choose(&mut rand::thread_rng()).unwrap(),
-                    lba * blocks,
-                    write,
-                );
-
+                let submitted =
+                    qpair.submit_io(buffer_slices_it.next().unwrap(), lba * blocks, write);
                 total += before.elapsed();
-                outstanding_ops += submitted_ops;
+                outstanding_ops += 1;
             }
 
             if outstanding_ops != 0 {
@@ -161,4 +202,49 @@ fn qd_n_multithread(
         },
         Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),
     }
+}
+
+fn qd_1_singlethread(
+    mut nvme: NvmeDevice,
+    write: bool,
+    random: bool,
+    duration: Duration,
+) -> Result<NvmeDevice, Box<dyn Error>> {
+    let blocks = 8;
+    let bytes = 512 * blocks;
+    let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1; // - blocks - 1;
+
+    let mut rng = thread_rng();
+    let mut buffer = nvme.allocate(PAGESIZE_4KIB)?;
+
+    let rand_block = &(0..bytes).map(|_| rand::random::<u8>()).collect::<Vec<_>>()[..];
+    buffer[..rand_block.len()].copy_from_slice(rand_block);
+
+    let mut total = Duration::ZERO;
+
+    let mut ios = 0;
+    let lba = 0;
+    while total < duration {
+        let lba = if random {
+            rng.gen_range(0..ns_blocks)
+        } else {
+            (lba + 1) % ns_blocks
+        };
+
+        let before = Instant::now();
+        if write {
+            nvme.write(&buffer.slice(0..bytes as usize), lba * blocks)?;
+        } else {
+            nvme.read(&buffer.slice(0..bytes as usize), lba * blocks)?;
+        }
+        let elapsed = before.elapsed();
+        total += elapsed;
+        ios += 1;
+    }
+    println!(
+        "IOP: {ios}, total {} iops: {:?}",
+        if write { "write" } else { "read" },
+        ios as f64 / total.as_secs_f64()
+    );
+    Ok(nvme)
 }
