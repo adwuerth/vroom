@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+
 use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::{Dma, DmaSlice, Pagesize};
@@ -6,6 +8,7 @@ use crate::Result;
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::hint::spin_loop;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -276,7 +279,7 @@ unsafe impl Send for NvmeDevice {}
 
 unsafe impl Sync for NvmeDevice {}
 
-const BUFFER_SIZE: usize = PAGESIZE_4KIB;
+static BUFFER_SIZE: AtomicUsize = AtomicUsize::new(PAGESIZE_4KIB);
 
 // currently fixed
 const PRP_LIST_SIZE: usize = PAGESIZE_4KIB;
@@ -293,7 +296,7 @@ impl NvmeDevice {
         // Map the device's resource0
         let (addr, len) = allocator.map_resource()?;
 
-        let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE)?;
+        let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE.load(Ordering::Relaxed))?;
         let prp_list: Dma<[u64; 512]> = allocator.allocate(PRP_LIST_SIZE)?;
 
         let mut dev = Self {
@@ -489,13 +492,16 @@ impl NvmeDevice {
 
     /// # Errors
     pub fn delete_io_queue_pair(&mut self, qpair: &NvmeQueuePair) -> Result<()> {
-        println!("Deleting i/o queue pair with id {}", qpair.id);
+        // println!("Deleting i/o queue pair with id {}", qpair.id);
         self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::delete_io_submission_queue(c_id, qpair.id)
         })?;
         self.submit_and_complete_admin(|c_id, _| {
             NvmeCommand::delete_io_completion_queue(c_id, qpair.id)
         })?;
+
+        self.deallocate(&qpair.sub_queue.commands);
+        self.deallocate(&qpair.comp_queue.commands);
         Ok(())
     }
 
@@ -903,7 +909,7 @@ impl NvmeDevice {
     }
 
     /// # Panics
-    pub fn clear_namespace(&mut self, ns_id: Option<u32>) {
+    pub fn format_namespace(&mut self, ns_id: Option<u32>) {
         let ns_id = if let Some(ns_id) = ns_id {
             assert!(self.namespaces.contains_key(&ns_id));
             ns_id
@@ -991,7 +997,7 @@ impl Mapping for NvmeDevice {
         self.allocator.allocate(size)
     }
 
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
+    fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
         self.allocator.deallocate(dma)
     }
 

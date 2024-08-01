@@ -9,7 +9,7 @@ pub trait Mapping {
 
     /// Deallocate memory in host memory and unmap it
     /// # Errors
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()>;
+    fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()>;
 
     /// Map a device region into host memory
     /// # Errors
@@ -40,7 +40,7 @@ impl MemoryMapping {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-            Self::Mmio(Mmio::init(pci_addr)?)
+            Self::Mmio(Mmio::init_with_args(pci_addr, page_size)?)
         })
     }
 
@@ -59,7 +59,7 @@ impl Mapping for MemoryMapping {
         }
     }
 
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
+    fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
         match self {
             Self::Mmio(mmio) => mmio.deallocate(dma),
             Self::Vfio(vfio) => vfio.deallocate(dma),

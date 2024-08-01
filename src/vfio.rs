@@ -4,8 +4,8 @@
 use crate::ioctl_op::{IoctlFlag, IoctlOperation};
 use crate::mapping::Mapping;
 use crate::{
-    ioctl_unsafe, mmap_anonymous_unsafe, mmap_unsafe, pread_unsafe, pwrite_unsafe, Error,
-    PAGESIZE_2MIB,
+    ioctl_unsafe, mmap_anonymous_unsafe, mmap_unsafe, munmap_unsafe, pread_unsafe, pwrite_unsafe,
+    Error, PAGESIZE_2MIB,
 };
 use std::fmt::Display;
 use std::fs;
@@ -505,10 +505,8 @@ impl Vfio {
             let free_chunk_size = aligned_addr as usize - addr as usize;
 
             // free unneeded pages (i.e. all chunks of the additionally mapped huge page)
-            unsafe {
-                libc::munmap(addr, free_chunk_size);
-                libc::munmap(aligned_addr.add(size), PAGESIZE_2MIB - free_chunk_size);
-            }
+            munmap_unsafe!(addr, free_chunk_size)?;
+            munmap_unsafe!(aligned_addr.add(size), PAGESIZE_2MIB - free_chunk_size)?;
 
             // finally map huge pages at the huge page size aligned 32-bit address
             mmap_unsafe!(
@@ -594,18 +592,14 @@ impl Mapping for Vfio {
         self.map_resource_index(Self::VFIO_PCI_BAR0_REGION_INDEX)
     }
 
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
-        self.unmap_dma(&dma)?;
+    fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
+        self.unmap_dma(dma)?;
 
         let size = self.page_size.shift_up(dma.size);
 
-        match unsafe { libc::munmap(dma.virt.cast::<libc::c_void>(), size) } {
-            0 => {
-                println!("deallocated memory");
-                Ok(())
-            }
-            _ => Err("failed to munmap memory".into()),
-        }
+        munmap_unsafe!(dma.virt.cast::<libc::c_void>(), size)?;
+
+        Ok(())
     }
 }
 

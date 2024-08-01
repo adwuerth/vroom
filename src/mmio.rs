@@ -114,7 +114,9 @@ impl Mmio {
     pub fn unbind_driver(&self) -> Result<()> {
         let path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
 
-        let res = fs::OpenOptions::new().write(true).open(path)?;
+        let mut file = fs::OpenOptions::new().write(true).open(path)?;
+        write!(file, "{}", self.pci_addr)?;
+
         Ok(())
     }
 
@@ -182,7 +184,7 @@ impl Mapping for Mmio {
         Ok((ptr.cast::<u8>(), len))
     }
 
-    fn deallocate<T>(&self, dma: Dma<T>) -> Result<()> {
+    fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
         let addr = dma.virt.cast::<libc::c_void>();
         let len = dma.size;
 

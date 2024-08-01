@@ -8,6 +8,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::time::Instant;
 use std::{env, process, vec};
+use vroom::NvmeDevice;
 use vroom::{memory::*, Mapping};
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -29,18 +30,19 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let alloc_size = match args.next() {
-        Some(arg) => arg.parse::<usize>().unwrap(),
-        None => {
-            eprintln!("no alloc size");
-            process::exit(1);
-        }
-    };
-
+    let mut is_mmio = false;
     let page_size = match page_size.as_str() {
         "4k" => Pagesize::Page4K,
         "2m" => Pagesize::Page2M,
         "1g" => Pagesize::Page1G,
+        "mmio2m" => {
+            is_mmio = true;
+            Pagesize::Page2M
+        }
+        "mmio1g" => {
+            is_mmio = true;
+            Pagesize::Page1G
+        }
         _ => {
             eprintln!("Invalid page size");
             process::exit(1);
@@ -51,16 +53,51 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     //nvme
     let random = true;
     let write = true;
-
-    // const THRESHOLD: u128 = 10000000;
-
     let mut nvme = vroom::init_with_page_size(&pci_addr, page_size.clone())?;
 
-    // let dma = nvme.allocate::<u8>(page_size.size())?;
-    // nvme.write(&dma, 0)?;
-    // nvme.deallocate(dma)?;
+    // Pre-run
+    // {
+    //     let (nvme_res, _) = pagesizemedians(nvme, &page_size, 128, random)?;
+    //     nvme = nvme_res;
+    // }
+    // nvme.format_namespace(Some(1));
 
-    // nvme.set_page_size(page_size.clone());
+    let mut alloc_size = 8;
+    let max_alloc = 2048;
+
+    let mut data = vec![];
+
+    while alloc_size <= max_alloc {
+        let median = {
+            let (nvme_res, median_res) = pagesizemedians(nvme, &page_size, alloc_size, random)?;
+            nvme = nvme_res;
+            median_res
+        };
+        data.push((alloc_size, median));
+        nvme.format_namespace(Some(1));
+        alloc_size *= 2;
+    }
+
+    let mut file = File::create(format!(
+        "pagesizemedians_{}_{}.txt",
+        if is_mmio { "mmio" } else { "vfio" },
+        page_size
+    ))?;
+    writeln!(file, "pages,median")?;
+    for entry in data {
+        writeln!(file, "{},{}", entry.0, entry.1)?;
+    }
+
+    // write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
+    Ok(())
+}
+
+fn pagesizemedians(
+    mut nvme: NvmeDevice,
+    page_size: &Pagesize,
+    alloc_size: usize,
+    random: bool,
+) -> Result<(NvmeDevice, u128), Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks - 1;
     let mut rng = rand::thread_rng();
@@ -115,38 +152,16 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     let median = median(latencies.clone()).unwrap();
 
+    nvme.deallocate(&dma)?;
     println!(
         "total: {}, median: {}",
         total.as_micros() / previous_dmas.len() as u128,
         median
     );
 
-    // nvme.deallocate(dma)?;
-
-    write_nanos_to_file(latencies, write, &page_size, alloc_size, false, "pages")?;
-    Ok(())
+    Ok((nvme, median))
 }
 
-fn write_nanos_to_file(
-    latencies: Vec<u128>,
-    write: bool,
-    page_size: &Pagesize,
-    buffer_mult: usize,
-    second_run: bool,
-    extra_param: &str,
-) -> Result<(), Box<dyn Error>> {
-    const IOMMU: &str = "vfio";
-    let mut file = File::create(format!(
-        "latency_intmap_{}_{}ps_{buffer_mult}_{IOMMU}_{}_{extra_param}.txt",
-        if write { "write" } else { "read" },
-        page_size,
-        if second_run { "second" } else { "first" },
-    ))?;
-    for lat in latencies {
-        writeln!(file, "{}", lat)?;
-    }
-    Ok(())
-}
 fn median(mut latencies: Vec<u128>) -> Option<u128> {
     let len = latencies.len();
     if len == 0 {

@@ -47,7 +47,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let random = true;
     let write = true;
 
-    let mut medians = vec![];
+    // let mut medians = vec![];
 
     // let (nvme, median) = test_throughput_random(nvme, 1, 1, duration, random, write, 65536)?;
     // medians.push(median);
@@ -67,29 +67,20 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // let (nvme, median) = test_throughput_random(nvme, 1, 128, duration, random, write, 65536)?;
     // medians.push(median);
 
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 16)?;
-    // medians.push(median);
+    let mut data = vec![];
 
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32)?;
-    // medians.push(median);
+    let mut pages: usize = 1;
+    while pages <= 64 {
+        let (median, iops) = {
+            let (nvme_result, median_result, iops_result) =
+                test_throughput_random(nvme, 1, 16, duration, random, write, pages)?;
+            nvme = nvme_result;
+            (median_result, iops_result)
+        };
 
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 64)?;
-    // medians.push(median);
-
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 128)?;
-    // medians.push(median);
-
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 256)?;
-    // medians.push(median);
-
-    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 512)?;
-    medians.push(median);
-
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 1024)?;
-    // medians.push(median);
-
-    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 2048)?;
-    // medians.push(median);
+        data.push((pages, median, iops));
+        pages *= 2;
+    }
 
     // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 4096)?;
     // medians.push(median);
@@ -100,13 +91,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 16384)?;
     // medians.push(median);
 
-    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
-    medians.push(median);
-    let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
-    medians.push(median);
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
+    // medians.push(median);
+    // let (nvme, median) = test_throughput_random(nvme, 1, 16, duration, random, write, 32768)?;
+    // medians.push(median);
     let mut file = File::create(format!("qd1lats_{}.txt", page_size))?;
-    for lat in medians {
-        writeln!(file, "{}", lat)?;
+    for entry in data {
+        writeln!(file, "{},{},{}", entry.0, entry.1, entry.2)?;
     }
 
     Ok(())
@@ -120,7 +111,7 @@ fn test_throughput_random(
     random: bool,
     write: bool,
     ps4k_alloc: usize,
-) -> Result<(NvmeDevice, u128), Box<dyn Error>> {
+) -> Result<(NvmeDevice, u128, f64), Box<dyn Error>> {
     println!();
     println!("---------------------------------------------------------------");
     println!();
@@ -169,7 +160,7 @@ fn qd_1_multithread(
     random: bool,
     write: bool,
     ps4k_alloc: usize,
-) -> Result<(NvmeDevice, u128), Box<dyn Error>> {
+) -> Result<(NvmeDevice, u128, f64), Box<dyn Error>> {
     let blocks = 8;
     let ns_blocks = nvme.namespaces.get(&1).unwrap().blocks / blocks;
 
@@ -232,7 +223,7 @@ fn qd_1_multithread(
             total_io_ops += outstanding_ops as u64;
             assert!(qpair.sub_queue.is_empty());
             nvme.lock().unwrap().delete_io_queue_pair(&qpair).unwrap();
-            nvme.lock().unwrap().deallocate(buffer).unwrap();
+            nvme.lock().unwrap().deallocate(&buffer).unwrap();
 
             (
                 total_io_ops,
@@ -265,7 +256,7 @@ fn qd_1_multithread(
     );
     match Arc::try_unwrap(nvme) {
         Ok(mutex) => match mutex.into_inner() {
-            Ok(t) => Ok((t, median)),
+            Ok(t) => Ok((t, median, total.1)),
             Err(e) => Err(e.into()),
         },
         Err(_) => Err("Arc::try_unwrap failed, not the last reference.".into()),

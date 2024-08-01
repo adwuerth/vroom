@@ -27,14 +27,17 @@ pub struct NvmeCompletion {
 
 /// maximum amount of submission entries on a 2MiB huge page
 // pub const QUEUE_LENGTH: usize = 1024;
-pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
-// pub const QUEUE_LENGTH: usize = 64;
+// pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
+pub const QUEUE_LENGTH: usize = 64;
+
+// static QUEUE_LENGTH: AtomicUsize =
+//     AtomicUsize::new((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
 
 /// Submission queue
 pub struct SubmissionQueue {
     // TODO: switch to mempool for larger queue
     // commands: Dma<[NvmeCommand; QUEUE_LENGTH]>,
-    commands: Dma<u8>,
+    pub(crate) commands: Dma<u8>,
     pub head: usize,
     pub tail: usize,
     len: usize,
@@ -90,7 +93,7 @@ impl SubmissionQueue {
 
 /// Completion queue
 pub struct CompletionQueue {
-    commands: Dma<[NvmeCompletion; QUEUE_LENGTH]>,
+    pub(crate) commands: Dma<[NvmeCompletion; QUEUE_LENGTH]>,
     head: usize,
     phase: bool,
     len: usize,
