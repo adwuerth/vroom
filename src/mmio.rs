@@ -11,8 +11,8 @@ use std::{default, fs, io, mem, process, ptr};
 
 static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 
-use crate::{mlock, munlock, munmap, Result};
-use crate::{mmap, mmap_fd, Error};
+use crate::{mlock_unsafe, mmap_fd_unsafe, munlock_unsafe, munmap_unsafe, Result};
+use crate::{mmap_unsafe, Error};
 
 pub struct Mmio {
     pci_addr: String,
@@ -154,9 +154,9 @@ impl Mapping for Mmio {
             }
         };
 
-        let ptr = mmap_fd!(size, self.page_size.mmap_flags(), file.as_raw_fd())?;
+        let ptr = mmap_fd_unsafe!(size, self.page_size.mmap_flags(), file.as_raw_fd())?;
 
-        mlock!(ptr, size)?;
+        mlock_unsafe!(ptr, size)?;
 
         Ok(Dma {
             virt: ptr.cast::<T>(),
@@ -177,7 +177,7 @@ impl Mapping for Mmio {
         }
 
         // mmap with null ptr to address => kernel chooses address to create mapping
-        let ptr = mmap_fd!(len, file.as_raw_fd())?;
+        let ptr = mmap_fd_unsafe!(len, file.as_raw_fd())?;
 
         Ok((ptr.cast::<u8>(), len))
     }
@@ -186,9 +186,9 @@ impl Mapping for Mmio {
         let addr = dma.virt.cast::<libc::c_void>();
         let len = dma.size;
 
-        munlock!(addr, len)?;
+        munlock_unsafe!(addr, len)?;
 
-        munmap!(addr, len)?;
+        munmap_unsafe!(addr, len)?;
 
         Ok(())
     }

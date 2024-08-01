@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! ioctl {
+macro_rules! ioctl_unsafe {
     ($fd:expr, $op:expr, $arg:expr) => {{
         let op = $op.op();
         let result = unsafe { libc::ioctl($fd, op, $arg) };
@@ -27,7 +27,7 @@ macro_rules! ioctl {
 }
 
 #[macro_export]
-macro_rules! mmap {
+macro_rules! mmap_unsafe {
     ($addr:expr, $len:expr, $prot:expr, $flags:expr, $fd:expr, $offset:expr) => {{
         let ptr = unsafe { libc::mmap($addr, $len, $prot, $flags, $fd, $offset) };
         if ptr == libc::MAP_FAILED {
@@ -42,7 +42,7 @@ macro_rules! mmap {
 }
 
 #[macro_export]
-macro_rules! munmap {
+macro_rules! munmap_unsafe {
     ($addr:expr, $len:expr) => {{
         let result = unsafe { libc::munmap($addr, $len) };
         if result == -1 {
@@ -57,9 +57,9 @@ macro_rules! munmap {
 }
 
 #[macro_export]
-macro_rules! mmap_anonymous {
+macro_rules! mmap_anonymous_unsafe {
     ($len:expr, $flags:expr) => {
-        mmap!(
+        mmap_unsafe!(
             ptr::null_mut(),
             $len,
             libc::PROT_READ | libc::PROT_WRITE,
@@ -69,14 +69,14 @@ macro_rules! mmap_anonymous {
         )
     };
     ($len:expr) => {
-        mmap_anonymous!($len, 0)
+        mmap_anonymous_unsafe!($len, 0)
     };
 }
 
 #[macro_export]
-macro_rules! mmap_fd {
+macro_rules! mmap_fd_unsafe {
     ($len:expr, $flags:expr, $fd:expr) => {
-        mmap!(
+        mmap_unsafe!(
             ptr::null_mut(),
             $len,
             libc::PROT_READ | libc::PROT_WRITE,
@@ -86,12 +86,12 @@ macro_rules! mmap_fd {
         )
     };
     ($len:expr, $fd:expr) => {
-        mmap_fd!($len, 0, $fd)
+        mmap_fd_unsafe!($len, 0, $fd)
     };
 }
 
 #[macro_export]
-macro_rules! mlock {
+macro_rules! mlock_unsafe {
     ($addr:expr, $len:expr) => {{
         let result = unsafe { libc::mlock($addr, $len) };
         if result == -1 {
@@ -103,7 +103,7 @@ macro_rules! mlock {
 }
 
 #[macro_export]
-macro_rules! munlock {
+macro_rules! munlock_unsafe {
     ($addr:expr, $len:expr) => {{
         let result = unsafe { libc::munlock($addr, $len) };
         if result == -1 {
@@ -115,7 +115,7 @@ macro_rules! munlock {
 }
 
 #[macro_export]
-macro_rules! pread {
+macro_rules! pread_unsafe {
     ($fd:expr, $buf:expr, $count:expr, $offset:expr) => {{
         if unsafe { libc::pread($fd, $buf, $count, $offset) } == -1 {
             Err(Error::Io(std::io::Error::new(
@@ -129,7 +129,7 @@ macro_rules! pread {
 }
 
 #[macro_export]
-macro_rules! pwrite {
+macro_rules! pwrite_unsafe {
     ($fd:expr, $buf:expr, $count:expr, $offset:expr) => {{
         if unsafe { libc::pwrite($fd, $buf, $count, $offset) } == -1 {
             Err(Error::Io(std::io::Error::new(

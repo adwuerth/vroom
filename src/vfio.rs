@@ -3,7 +3,10 @@
 
 use crate::ioctl_op::{IoctlFlag, IoctlOperation};
 use crate::mapping::Mapping;
-use crate::{ioctl, mmap, mmap_anonymous, pread, pwrite, Error, PAGESIZE_2MIB};
+use crate::{
+    ioctl_unsafe, mmap_anonymous_unsafe, mmap_unsafe, pread_unsafe, pwrite_unsafe, Error,
+    PAGESIZE_2MIB,
+};
 use std::fmt::Display;
 use std::fs;
 use std::fs::{File, OpenOptions};
@@ -105,13 +108,13 @@ impl Vfio {
         let container_fd = container_file.into_raw_fd();
 
         // check if the container's API version is the same as the VFIO API's
-        let api_version = ioctl!(container_fd, IoctlOperation::VFIO_GET_API_VERSION)?;
+        let api_version = ioctl_unsafe!(container_fd, IoctlOperation::VFIO_GET_API_VERSION)?;
         if api_version != Self::VFIO_API_VERSION {
             return Err(Error::Vfio("Unknown VFIO API Version".to_string()));
         }
 
         // check if type1 is supported
-        let res = ioctl!(
+        let res = ioctl_unsafe!(
             container_fd,
             IoctlOperation::VFIO_CHECK_EXTENSION,
             Self::VFIO_TYPE1_IOMMU
@@ -148,7 +151,7 @@ impl Vfio {
             group_fd = group_file.into_raw_fd();
 
             // Test the group is viable and available
-            ioctl!(
+            ioctl_unsafe!(
                 group_fd,
                 IoctlOperation::VFIO_GROUP_GET_STATUS,
                 &mut group_status
@@ -162,7 +165,7 @@ impl Vfio {
             }
 
             // Add the group to the container
-            ioctl!(
+            ioctl_unsafe!(
                 group_fd,
                 IoctlOperation::VFIO_GROUP_SET_CONTAINER,
                 &container_fd
@@ -172,14 +175,15 @@ impl Vfio {
         }
 
         // Enable the IOMMU model we want
-        ioctl!(
+        ioctl_unsafe!(
             container_fd,
             IoctlOperation::VFIO_SET_IOMMU,
             Self::VFIO_TYPE1_IOMMU
         )?;
 
         // Get a file descriptor for the device
-        let device_fd = ioctl!(group_fd, IoctlOperation::VFIO_GROUP_GET_DEVICE_FD, pci_addr)?;
+        let device_fd =
+            ioctl_unsafe!(group_fd, IoctlOperation::VFIO_GROUP_GET_DEVICE_FD, pci_addr)?;
 
         let mut iommu_info: vfio_iommu_type1_info = vfio_iommu_type1_info {
             argsz: mem::size_of::<vfio_iommu_type1_info>() as u32,
@@ -189,7 +193,7 @@ impl Vfio {
             pad: 0,
         };
 
-        ioctl!(
+        ioctl_unsafe!(
             container_fd,
             IoctlOperation::VFIO_IOMMU_GET_INFO,
             &mut iommu_info
@@ -255,13 +259,13 @@ impl Vfio {
             pt_id: 0,
         };
 
-        ioctl!(cdev_fd, IoctlOperation::VFIO_DEVICE_BIND_IOMMUFD, &mut bind)?;
+        ioctl_unsafe!(cdev_fd, IoctlOperation::VFIO_DEVICE_BIND_IOMMUFD, &mut bind)?;
 
-        ioctl!(iommufd, IoctlOperation::IOMMU_IOAS_ALLOC, &mut alloc_data)?;
+        ioctl_unsafe!(iommufd, IoctlOperation::IOMMU_IOAS_ALLOC, &mut alloc_data)?;
 
         attach_data.pt_id = alloc_data.out_ioas_id;
 
-        ioctl!(
+        ioctl_unsafe!(
             cdev_fd,
             IoctlOperation::VFIO_DEVICE_ATTACH_IOMMUFD_PT,
             &mut attach_data
@@ -313,7 +317,7 @@ impl Vfio {
             offset: 0,
         };
 
-        ioctl!(
+        ioctl_unsafe!(
             self.device_fd,
             IoctlOperation::VFIO_DEVICE_GET_REGION_INFO,
             &mut conf_reg
@@ -322,7 +326,7 @@ impl Vfio {
         // Read current value of command register
         let mut dma: u16 = 0;
 
-        pread!(
+        pread_unsafe!(
             self.device_fd,
             std::ptr::addr_of_mut!(dma).cast::<libc::c_void>(),
             2,
@@ -332,7 +336,7 @@ impl Vfio {
         // Set the bus master enable bit
         dma |= 1 << BUS_MASTER_ENABLE_BIT;
 
-        pwrite!(
+        pwrite_unsafe!(
             self.device_fd,
             std::ptr::addr_of_mut!(dma).cast::<libc::c_void>(),
             2,
@@ -355,7 +359,7 @@ impl Vfio {
             offset: 0,
         };
 
-        ioctl!(
+        ioctl_unsafe!(
             self.device_fd,
             IoctlOperation::VFIO_DEVICE_GET_REGION_INFO,
             &mut region_info
@@ -363,7 +367,7 @@ impl Vfio {
 
         let len = region_info.size as usize;
 
-        let ptr = mmap!(
+        let ptr = mmap_unsafe!(
             ptr::null_mut(),
             len,
             libc::PROT_READ | libc::PROT_WRITE,
@@ -394,7 +398,7 @@ impl Vfio {
             size,
         };
 
-        ioctl!(
+        ioctl_unsafe!(
             self.container_fd,
             IoctlOperation::VFIO_IOMMU_MAP_DMA,
             &mut iommu_dma_map
@@ -423,7 +427,7 @@ impl Vfio {
             iova: 0,
         };
 
-        ioctl!(self.iommufd, IoctlOperation::IOMMU_IOAS_MAP, &mut map)?;
+        ioctl_unsafe!(self.iommufd, IoctlOperation::IOMMU_IOAS_MAP, &mut map)?;
 
         Ok(Dma {
             virt: ptr.cast::<T>(),
@@ -443,7 +447,7 @@ impl Vfio {
             data: ptr::null_mut(),
         };
 
-        ioctl!(
+        ioctl_unsafe!(
             self.container_fd,
             IoctlOperation::VFIO_IOMMU_UNMAP_DMA,
             &mut dma_unmap
@@ -479,7 +483,7 @@ impl Vfio {
 
     /// Allocate `size` bytes memory with 1 GiB page size on the host device. Returns pointer to allocated memory, currently only works on 64 bit systems
     fn allocate_1gib(size: usize) -> Result<*mut libc::c_void> {
-        mmap_anonymous!(size, libc::MAP_HUGETLB | libc::MAP_HUGE_1GB)
+        mmap_anonymous_unsafe!(size, libc::MAP_HUGETLB | libc::MAP_HUGE_1GB)
     }
 
     /// Allocate `size` bytes memory with 2 MiB page size on the host device. Returns pointer to allocated memory
@@ -492,7 +496,7 @@ impl Vfio {
 
             // first allocate memory of size (needed size + 1 huge page) to
             // get a mapping containing the huge page size aligned address
-            let addr = mmap_anonymous!(size + PAGESIZE_2MIB, libc::MAP_32BIT)?;
+            let addr = mmap_anonymous_unsafe!(size + PAGESIZE_2MIB, libc::MAP_32BIT)?;
 
             // calculate the huge page size aligned address by rounding up
             let aligned_addr = ((addr as isize + PAGESIZE_2MIB as isize - 1)
@@ -507,7 +511,7 @@ impl Vfio {
             }
 
             // finally map huge pages at the huge page size aligned 32-bit address
-            mmap!(
+            mmap_unsafe!(
                 aligned_addr.cast::<libc::c_void>(),
                 size,
                 libc::PROT_READ | libc::PROT_WRITE,
@@ -520,7 +524,7 @@ impl Vfio {
                 0
             )
         } else {
-            mmap_anonymous!(size, libc::MAP_HUGETLB | libc::MAP_HUGE_2MB)
+            mmap_anonymous_unsafe!(size, libc::MAP_HUGETLB | libc::MAP_HUGE_2MB)
         }
     }
 
@@ -529,9 +533,9 @@ impl Vfio {
         if IOVA_WIDTH.load(Ordering::Relaxed) < X86_VA_WIDTH {
             // To support IOMMUs capable of 39 bit wide IOVAs only, we use
             // 32 bit addresses.
-            mmap_anonymous!(size, libc::MAP_32BIT)
+            mmap_anonymous_unsafe!(size, libc::MAP_32BIT)
         } else {
-            mmap_anonymous!(size)
+            mmap_anonymous_unsafe!(size)
         }
     }
 
