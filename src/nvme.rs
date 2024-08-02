@@ -1,5 +1,3 @@
-use lazy_static::lazy_static;
-
 use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryMapping};
 use crate::memory::{Dma, DmaSlice, Pagesize};
@@ -406,11 +404,19 @@ impl NvmeDevice {
 
     /// Identify `NVMe` Controller
     /// # Errors    
-    pub fn identify_controller(&mut self) -> Result<()> {
+    pub fn identify_controller_print(&mut self) -> Result<()> {
         println!("Trying to identify controller");
-        let _entry = self.submit_and_complete_admin(NvmeCommand::identify_controller);
 
-        println!("Dumping identify controller");
+        let (model, serial, firmware) = self.identify_controller()?;
+
+        println!("  - Model: {model} Serial: {serial} Firmware: {firmware}");
+
+        Ok(())
+    }
+    /// Identify `NVMe` Controller
+    /// # Errors    
+    pub fn identify_controller(&mut self) -> Result<(String, String, String)> {
+        self.submit_and_complete_admin(NvmeCommand::identify_controller)?;
         let mut serial = String::new();
         let data = &self.buffer;
 
@@ -437,16 +443,12 @@ impl NvmeDevice {
             firmware.push(b as char);
         }
 
-        println!(
-            "  - Model: {} Serial: {} Firmware: {}",
-            model.trim(),
-            serial.trim(),
-            firmware.trim()
-        );
+        let model = model.trim().to_string();
+        let serial = serial.trim().to_string();
+        let firmware = firmware.trim().to_string();
 
-        Ok(())
+        Ok((model, serial, firmware))
     }
-
     // 1 to 1 Submission/Completion Queue Mapping
     ///
     /// # Panics
@@ -500,8 +502,8 @@ impl NvmeDevice {
             NvmeCommand::delete_io_completion_queue(c_id, qpair.id)
         })?;
 
-        self.deallocate(&qpair.sub_queue.commands);
-        self.deallocate(&qpair.comp_queue.commands);
+        self.deallocate(&qpair.sub_queue.commands)?;
+        self.deallocate(&qpair.comp_queue.commands)?;
         Ok(())
     }
 

@@ -63,8 +63,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // nvme.format_namespace(Some(1));
 
     let mut alloc_size = 8;
-    let max_alloc = 2048;
 
+    let mut max_alloc = 2048;
+    if page_size == Pagesize::Page1G {
+        max_alloc = 192;
+    }
     let mut data = vec![];
 
     while alloc_size <= max_alloc {
@@ -74,8 +77,20 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             median_res
         };
         data.push((alloc_size, median));
+        println!("formatting");
         nvme.format_namespace(Some(1));
+        println!("formatting done");
         alloc_size *= 2;
+    }
+
+    if page_size == Pagesize::Page1G {
+        let median = {
+            let (nvme_res, median_res) = pagesizemedians(nvme, &page_size, 192, random)?;
+            nvme = nvme_res;
+            median_res
+        };
+        data.push((192, median));
+        nvme.format_namespace(Some(1));
     }
 
     let mut file = File::create(format!(
@@ -110,22 +125,24 @@ fn pagesizemedians(
 
     let dma_size = alloc_size * dma_mult;
 
+    println!("allocating");
     let mut dma = nvme.allocate::<u8>(dma_size)?;
+    println!("allocate done");
 
-    let rand_block = &(0..dma_size)
-        .map(|_| rand::random::<u8>())
-        .collect::<Vec<_>>()[..];
-    dma[0..dma_size].copy_from_slice(rand_block);
+    // let rand_block = &(0..dma_size)
+    //     .map(|_| rand::random::<u8>())
+    //     .collect::<Vec<_>>()[..];
+    // dma[0..dma_size].copy_from_slice(rand_block);
 
     for i in 0..alloc_size {
-        // let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
-        //     .map(|_| rand::random::<u8>())
-        //     .collect::<Vec<_>>()[..];
-        // dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
+        let rand_block = &(i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB)
+            .map(|_| rand::random::<u8>())
+            .collect::<Vec<_>>()[..];
+        dma[i * dma_mult..(i * dma_mult) + PAGESIZE_4KIB].copy_from_slice(rand_block);
         previous_dmas.push(dma.slice(i * dma_mult..(i * dma_mult) + split_size));
     }
 
-    println!("alloc done");
+    println!("now running test");
 
     let mut total = Duration::ZERO;
 
@@ -150,9 +167,13 @@ fn pagesizemedians(
         }
     }
 
+    println!("test done");
+
     let median = median(latencies.clone()).unwrap();
 
+    println!("now deallocating");
     nvme.deallocate(&dma)?;
+    println!("dealloc done");
     println!(
         "total: {}, median: {}",
         total.as_micros() / previous_dmas.len() as u128,

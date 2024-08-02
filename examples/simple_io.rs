@@ -20,7 +20,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let lba = 0;
 
     // Initialize NVMe Driver
-    let mut nvme = vroom::init_with_page_size(&pci_addr, Pagesize::Page1G)?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, Pagesize::Page4K)?;
 
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();

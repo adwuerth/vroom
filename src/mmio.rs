@@ -6,6 +6,7 @@ use crate::pci::{
 use std::io::Write;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{default, fs, io, mem, process, ptr};
 
@@ -38,6 +39,12 @@ impl Mmio {
             page_size,
         };
 
+        if !mmio.is_bound_to_pci_stub()? {
+            return Err(Error::Mmio(
+                "The device is not bound to Pci-Stub!".to_string(),
+            ));
+        }
+
         // mmio.bind_to_stub_driver()?;
 
         // mmio.unbind_driver()?;
@@ -47,6 +54,32 @@ impl Mmio {
         mmio.disable_interrupts()?;
 
         Ok(mmio)
+    }
+
+    fn is_bound_to_pci_stub(&self) -> Result<bool> {
+        let pci_stub_dir = Path::new("/sys/bus/pci/drivers/pci-stub");
+
+        if !pci_stub_dir.exists() {
+            return Ok(false);
+        }
+
+        for entry in fs::read_dir(pci_stub_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_symlink() {
+                continue;
+            }
+
+            if let Some(filename) = path.file_name() {
+                if let Some(filename_str) = filename.to_str() {
+                    if filename_str == self.pci_addr {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     // todo check if this works
@@ -175,7 +208,7 @@ impl Mapping for Mmio {
         let len = fs::metadata(&path)?.len() as usize;
 
         if len == 0 {
-            return Err(Error::Custom("Resource0 len is 0".to_string()));
+            return Err(Error::Vroom("Resource0 len is 0".to_string()));
         }
 
         // mmap with null ptr to address => kernel chooses address to create mapping

@@ -499,6 +499,7 @@ impl Vfio {
             let addr = mmap_anonymous_unsafe!(size + PAGESIZE_2MIB, libc::MAP_32BIT)?;
 
             // calculate the huge page size aligned address by rounding up
+            #[allow(clippy::cast_possible_wrap)]
             let aligned_addr = ((addr as isize + PAGESIZE_2MIB as isize - 1)
                 & -(PAGESIZE_2MIB as isize)) as *mut libc::c_void;
 

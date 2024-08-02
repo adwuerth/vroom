@@ -88,5 +88,5 @@ pub fn read_hex(file: &mut File) -> Result<u64> {
     file.read_to_string(&mut buffer)?;
 
     u64::from_str_radix(buffer.trim().trim_start_matches("0x"), 16)
-        .map_err(|error| Error::Custom(error.to_string()))
+        .map_err(|error| Error::Vroom(error.to_string()))
 }

@@ -29,6 +29,8 @@ mod vfio_structs;
 mod macros;
 mod ioctl_op;
 
+use std::process;
+
 use memory::Pagesize;
 use memory::DEFAULT_PAGE_SIZE;
 pub use memory::PAGESIZE_1GIB;
@@ -80,7 +82,7 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
 
     let allocator = MemoryMapping::init_with_page_size(pci_addr, page_size)?;
     let mut nvme = NvmeDevice::init(pci_addr, Box::new(allocator))?;
-    nvme.identify_controller()?;
+    nvme.identify_controller_print()?;
     let ns = nvme.identify_namespace_list(0);
     for n in ns {
         println!("ns_id: {n}");
@@ -88,3 +90,9 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
     }
     Ok(nvme)
 }
+
+// fn check_nvme(pci_addr: &str) {
+//     if pci_addr == "0000:c4:00.0" {
+//         process::exit(1);
+//     }
+// }

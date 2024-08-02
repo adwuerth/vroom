@@ -35,7 +35,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut is_mmio = false;
     let page_size = match args.next() {
         Some(arg) => {
-            if &arg.to_lowercase() == "mmio" {
+            if &arg.to_lowercase() == "mmio1g" {
+                is_mmio = true;
+                Pagesize::Page1G
+            } else if &arg.to_lowercase() == "mmio2m" {
                 is_mmio = true;
                 Pagesize::Page2M
             } else {
@@ -58,10 +61,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut data = vec![];
 
     let mut pages: usize = 1;
-    while pages <= 32 {
+    while pages <= 64 {
         let (median, iops) = {
             let (nvme_result, median_result, iops_result) =
-                test_throughput_random(nvme, pages, 4, duration, random, write, 524288 / 2)?;
+                test_throughput_random(nvme, 1, pages as u64, duration, random, write, 512 * 512)?;
             nvme = nvme_result;
             (median_result, iops_result)
         };
@@ -72,11 +75,20 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         pages *= 2;
     }
 
+    {
+        let (nvme_result, _, _) = test_throughput_random(nvme, 1, 1, duration, random, write, 512)?;
+        nvme = nvme_result;
+    }
+
+    println!("formatting ns 1");
+    nvme.format_namespace(Some(1));
+
     let mut file = File::create(format!(
-        "qd1lats_{}_{}.txt",
+        "qd1lats_{}_{}.csv",
         if is_mmio { "mmio" } else { "vfio" },
         page_size
     ))?;
+    writeln!(file, "threads,latency,iops")?;
     for entry in data {
         writeln!(file, "{},{},{}", entry.0, entry.1, entry.2)?;
     }
