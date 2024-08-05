@@ -64,7 +64,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     while pages <= 64 {
         let (median, iops) = {
             let (nvme_result, median_result, iops_result) =
-                test_throughput_random(nvme, 1, pages as u64, duration, random, write, 512 * 512)?;
+                test_throughput_random(nvme, 32, pages as u64, duration, random, write, 256)?;
             nvme = nvme_result;
             (median_result, iops_result)
         };
@@ -177,12 +177,12 @@ fn qd_1_multithread(
             let mut buffer_slices_it = buffer_slices.iter().cycle();
 
             let mut outstanding_ops = 0;
-            let mut total_io_ops = 0;
+            let mut total_io_ops: u64 = 0;
             let lba = thread_num;
 
             let mut latencies = vec![];
 
-            while total < duration {
+            while total < duration && total_io_ops * 4096 <= (PAGESIZE_1GIB as u64) * 40 {
                 // let lba = rng.gen_range(range.0..range.1);
                 let lba = if random {
                     rng.gen_range(0..ns_blocks)

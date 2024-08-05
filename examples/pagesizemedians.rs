@@ -62,7 +62,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     // }
     // nvme.format_namespace(Some(1));
 
-    let mut alloc_size = 8;
+    let mut alloc_size = 1;
 
     let mut max_alloc = 2048;
     if page_size == Pagesize::Page1G {

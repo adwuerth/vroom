@@ -46,7 +46,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     // fill_ns(&mut nvme);
 
-    let nvme = test_throughput_random(nvme, 512, 32, duration, random, write)?;
+    let mut nvme = test_throughput_random(nvme, 32, 4, duration, random, write)?;
+    nvme.format_namespace(Some(1));
 
     Ok(())
 }

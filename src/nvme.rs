@@ -45,8 +45,8 @@ enum NvmeRegs64 {
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
 enum NvmeArrayRegs {
-    SQyTDBL,
-    CQyHDBL,
+    SQyTDBL, // Submission Queue Doorbell
+    CQyHDBL, // Completion Queue Doorbell
 }
 
 #[repr(C, packed)]
@@ -242,7 +242,7 @@ impl NvmeQueuePair {
 
 #[allow(unused)]
 pub struct NvmeDevice {
-    pci_addr: String,
+    pub pci_addr: String,
     addr: *mut u8,
     len: usize,
     // Doorbell stride
@@ -325,6 +325,10 @@ impl NvmeDevice {
             dev.prp_list[i - 1] = (dev.buffer.phys + i * 4096) as u64;
         }
 
+        let cap = dev.get_reg64(NvmeRegs64::CAP as u64);
+        let maximum_queue_size = (cap & 0xFFFF) as u16 + 1;
+        println!("Maximum Queue Size: {maximum_queue_size}");
+
         println!("CAP: 0x{:x}", dev.get_reg64(NvmeRegs64::CAP as u64));
         println!("VS: 0x{:x}", dev.get_reg32(NvmeRegs32::VS as u32));
         println!("CC: 0x{:x}", dev.get_reg32(NvmeRegs32::CC as u32));
@@ -344,7 +348,7 @@ impl NvmeDevice {
         }
 
         // Configure Admin Queues
-        // Initialize the addresses of the completion/submission queues on the device
+        // Initialize the addresses of the admin completion/submission queues on the device
         dev.set_reg64(NvmeRegs64::ASQ as u32, dev.admin_sq.get_addr() as u64);
         dev.set_reg64(NvmeRegs64::ACQ as u32, dev.admin_cq.get_addr() as u64);
         dev.set_reg32(
@@ -413,6 +417,7 @@ impl NvmeDevice {
 
         Ok(())
     }
+
     /// Identify `NVMe` Controller
     /// # Errors    
     pub fn identify_controller(&mut self) -> Result<(String, String, String)> {
@@ -449,6 +454,7 @@ impl NvmeDevice {
 
         Ok((model, serial, firmware))
     }
+
     // 1 to 1 Submission/Completion Queue Mapping
     ///
     /// # Panics
@@ -600,45 +606,6 @@ impl NvmeDevice {
         Ok(total)
     }
 
-    pub fn write_prp_raw(
-        &mut self,
-        own_prp: Vec<usize>,
-        mut lba: u64,
-        write: bool,
-    ) -> Result<Duration> {
-        let mut total = Duration::ZERO;
-
-        let len = own_prp.len();
-
-        // println!("submitting own_prp: {:#?}", own_prp);
-        // println!("received {} prp pages", prp_pages);
-
-        let mut i = 0;
-        for entry in &own_prp {
-            self.prp_list[i] = *entry as u64;
-        }
-
-        let byte_len = PAGESIZE_4KIB * len;
-
-        let blocks = (byte_len as u64 + 512 - 1) / 512;
-        let start = Instant::now();
-        self.namespace_io(
-            1,
-            blocks,
-            lba,
-            own_prp.into_iter().nth(0).unwrap() as u64,
-            write,
-        );
-        let elapsed = start.elapsed();
-        total += elapsed;
-
-        // println!("latency each: {}", total as u128 / len as u128);
-
-        lba += blocks;
-
-        Ok(total)
-    }
-
     /// `NVMe` read to `DmaSlice`
     /// # Errors
     pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<()> {
@@ -665,24 +632,6 @@ impl NvmeDevice {
         Ok(())
     }
 
-    /// # Errors
-    /// # Panics
-    pub fn write_copied_timed(&mut self, data: &[u8], mut lba: u64) -> Result<Duration> {
-        let ns = *self.namespaces.get(&1).unwrap();
-        let mut total_time = Duration::ZERO;
-        for chunk in data.chunks(128 * 4096) {
-            self.buffer[..chunk.len()].copy_from_slice(chunk);
-            let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
-            let start = Instant::now();
-            self.namespace_io(1, blocks, lba, self.buffer.phys as u64, true);
-            let elapsed = start.elapsed();
-            total_time += elapsed;
-
-            lba += blocks;
-        }
-
-        Ok(total_time)
-    }
     /// # Errors
     /// # Panics
     pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<()> {

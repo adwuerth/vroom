@@ -89,6 +89,14 @@ pub struct iommu_ioas_map {
 }
 
 #[repr(C)]
+pub struct iommu_ioas_unmap {
+    pub size: u32,
+    pub ioas_id: u32,
+    pub iova: u64,
+    pub length: u64,
+}
+
+#[repr(C)]
 pub struct vfio_device_bind_iommufd {
     pub argsz: u32,
     pub flags: u32,

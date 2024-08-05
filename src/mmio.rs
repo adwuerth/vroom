@@ -83,34 +83,34 @@ impl Mmio {
     }
 
     // todo check if this works
-    fn bind_to_stub_driver(&self) -> Result<()> {
-        let vendor_path = format!("/sys/bus/pci/devices/{}/vendor", self.pci_addr);
-        let device_path = format!("/sys/bus/pci/devices/{}/device", self.pci_addr);
+    // fn bind_to_stub_driver(&self) -> Result<()> {
+    //     let vendor_path = format!("/sys/bus/pci/devices/{}/vendor", self.pci_addr);
+    //     let device_path = format!("/sys/bus/pci/devices/{}/device", self.pci_addr);
 
-        let vendor = fs::read_to_string(vendor_path)?;
-        let device = fs::read_to_string(device_path)?;
+    //     let vendor = fs::read_to_string(vendor_path)?;
+    //     let device = fs::read_to_string(device_path)?;
 
-        let nvme_vd = format!("{vendor} {device}");
+    //     let nvme_vd = format!("{vendor} {device}");
 
-        println!("now trying to bind to pci-stub");
+    //     println!("now trying to bind to pci-stub");
 
-        let unbind_path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
-        let mut file = fs::OpenOptions::new().write(true).open(unbind_path)?;
-        file.write_all(self.pci_addr.as_bytes())?;
-        println!("unbound driver");
+    //     let unbind_path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
+    //     let mut file = fs::OpenOptions::new().write(true).open(unbind_path)?;
+    //     file.write_all(self.pci_addr.as_bytes())?;
+    //     println!("unbound driver");
 
-        // let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
-        // let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
-        // file.write_all(nvme_vd.as_bytes())?;
-        // println!("set new id");
+    //     // let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
+    //     // let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
+    //     // file.write_all(nvme_vd.as_bytes())?;
+    //     // println!("set new id");
 
-        let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
-        let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;
-        file.write_all(self.pci_addr.as_bytes())?;
-        println!("bound to pci-stub");
+    //     let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
+    //     let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;
+    //     file.write_all(self.pci_addr.as_bytes())?;
+    //     println!("bound to pci-stub");
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Translates a virtual address to its physical counterpart
     fn virt_to_phys(addr: usize) -> Result<usize> {
@@ -144,14 +144,14 @@ impl Mmio {
     }
 
     /// Unbinds kernel driver
-    pub fn unbind_driver(&self) -> Result<()> {
-        let path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
+    // pub fn unbind_driver(&self) -> Result<()> {
+    //     let path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
 
-        let mut file = fs::OpenOptions::new().write(true).open(path)?;
-        write!(file, "{}", self.pci_addr)?;
+    //     let mut file = fs::OpenOptions::new().write(true).open(path)?;
+    //     write!(file, "{}", self.pci_addr)?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Disable `INTx` interrupts for the device.
     pub fn disable_interrupts(&self) -> Result<()> {
@@ -171,8 +171,9 @@ impl Mapping for Mmio {
         let size = self.page_size.shift_up(size);
 
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
-        let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
 
+        let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
+        println!("allocating: {path}");
         let res = fs::OpenOptions::new()
             .read(true)
             .write(true)

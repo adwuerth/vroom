@@ -27,8 +27,12 @@ pub struct NvmeCompletion {
 
 /// maximum amount of submission entries on a 2MiB huge page
 // pub const QUEUE_LENGTH: usize = 1024;
-pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
-// pub const QUEUE_LENGTH: usize = 64;
+// pub const QUEUE_LENGTH: usize = 65536;
+// pub const QUEUE_LENGTH: usize = PAGESIZE_2MIB / mem::size_of::<NvmeCommand>();
+// pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
+pub const QUEUE_LENGTH: usize = 64;
+
+// pub const QUEUE_LENGTH: usize = 65536;
 
 // static QUEUE_LENGTH: AtomicUsize =
 //     AtomicUsize::new((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);

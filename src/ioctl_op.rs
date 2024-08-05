@@ -30,6 +30,7 @@ pub enum IoctlOperation {
     // IOMMUFD constants
     IOMMU_IOAS_ALLOC,
     IOMMU_IOAS_MAP,
+    IOMMU_IOAS_UNMAP,
 }
 
 impl IoctlOperation {
@@ -51,6 +52,7 @@ impl IoctlOperation {
     // these are enum values in iommufd.h
     const IOMMUFD_CMD_IOAS_ALLOC: u64 = 0x81;
     const IOMMUFD_CMD_IOAS_MAP: u64 = 0x85;
+    const IOMMUFD_CMD_IOAS_UNMAP: u64 = 0x86;
 
     pub const fn op(&self) -> u64 {
         let (type_, nr) = match self {
@@ -68,8 +70,10 @@ impl IoctlOperation {
             Self::VFIO_DEVICE_ATTACH_IOMMUFD_PT => (Self::VFIO_TYPE, Self::VFIO_BASE + 19),
             Self::VFIO_DEVICE_GET_IRQ_INFO => (Self::VFIO_TYPE, Self::VFIO_BASE + 9),
             Self::VFIO_DEVICE_SET_IRQS => (Self::VFIO_TYPE, Self::VFIO_BASE + 10),
+
             Self::IOMMU_IOAS_ALLOC => (Self::IOMMUFD_TYPE, Self::IOMMUFD_CMD_IOAS_ALLOC),
             Self::IOMMU_IOAS_MAP => (Self::IOMMUFD_TYPE, Self::IOMMUFD_CMD_IOAS_MAP),
+            Self::IOMMU_IOAS_UNMAP => (Self::IOMMUFD_TYPE, Self::IOMMUFD_CMD_IOAS_UNMAP),
         };
 
         Self::_IO(type_, nr)

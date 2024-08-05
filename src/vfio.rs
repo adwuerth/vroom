@@ -47,10 +47,8 @@ lazy_static! {
 pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
-    container_fd: RawFd,
-    ioas_id: u32,
-    iommufd: i32,
     page_size: Pagesize,
+    iommu: VfioIommu,
 }
 
 /// Implementation of Linux VFIO framework for direct device access.
@@ -79,13 +77,13 @@ impl Vfio {
     /// # Panics
     /// # Errors
     #[allow(clippy::too_many_lines)]
-    pub fn init_with_args(pci_addr: &str, page_size: Pagesize, use_cdev: bool) -> Result<Self> {
-        if use_cdev {
-            return Self::init_cdev(pci_addr, page_size);
+    pub fn init_with_args(pci_addr: &str, page_size: Pagesize, use_iommufd: bool) -> Result<Self> {
+        if use_iommufd {
+            return Self::init_iommufd(pci_addr, page_size);
         }
 
         let group_file: File;
-        let group_fd: RawFd;
+        // let group_fd: RawFd;
 
         println!(
             "initializing vfio with IOVA WIDTH = {}",
@@ -134,8 +132,8 @@ impl Vfio {
         let mut vfio_gfds = VFIO_GROUP_FILE_DESCRIPTORS.lock().unwrap();
 
         #[allow(clippy::map_entry)]
-        if vfio_gfds.contains_key(&group) {
-            group_fd = *vfio_gfds.get(&group).unwrap();
+        let group_fd: RawFd = if vfio_gfds.contains_key(&group) {
+            *vfio_gfds.get(&group).unwrap()
         } else {
             // open the devices' group
             group_file = OpenOptions::new()
@@ -148,7 +146,7 @@ impl Vfio {
                     ))
                 })?;
             // group file descriptor
-            group_fd = group_file.into_raw_fd();
+            let group_fd = group_file.into_raw_fd();
 
             // Test the group is viable and available
             ioctl_unsafe!(
@@ -172,7 +170,9 @@ impl Vfio {
             )?;
 
             vfio_gfds.insert(group, group_fd);
-        }
+
+            group_fd
+        };
 
         // Enable the IOMMU model we want
         ioctl_unsafe!(
@@ -199,17 +199,17 @@ impl Vfio {
             &mut iommu_info
         )?;
 
-        println!(
-            "IOMMU page sizes: {:b} {:x} {}",
-            iommu_info.iova_pgsizes, iommu_info.iova_pgsizes, iommu_info.iova_pgsizes
-        );
+        // println!(
+        //     "IOMMU page sizes: {:b} {:x} {}",
+        //     iommu_info.iova_pgsizes, iommu_info.iova_pgsizes, iommu_info.iova_pgsizes
+        // );
+
+        let mode = VfioIommu::Container { container_fd };
 
         let vfio = Self {
             pci_addr: pci_addr.to_string(),
             device_fd,
-            container_fd,
-            ioas_id: 0,
-            iommufd: 0,
+            iommu: mode,
             page_size,
         };
 
@@ -218,7 +218,7 @@ impl Vfio {
         Ok(vfio)
     }
 
-    fn init_cdev(pci_addr: &str, page_size: Pagesize) -> Result<Self> {
+    fn init_iommufd(pci_addr: &str, page_size: Pagesize) -> Result<Self> {
         let iommufd = OpenOptions::new()
             .read(true)
             .write(true)
@@ -271,12 +271,14 @@ impl Vfio {
             &mut attach_data
         )?;
 
+        let mode = VfioIommu::IOMMUFD {
+            ioas_id: (alloc_data.out_ioas_id),
+            iommufd: (iommufd),
+        };
         let vfio = Self {
             pci_addr: pci_addr.to_string(),
             device_fd: cdev_fd,
-            container_fd: -1,
-            ioas_id: alloc_data.out_ioas_id,
-            iommufd,
+            iommu: mode,
             page_size,
         };
 
@@ -384,76 +386,13 @@ impl Vfio {
     // Maps a memory region for DMA.
     /// # Errors
     pub fn map_dma<T>(&self, ptr: *mut libc::c_void, size: usize) -> Result<Dma<T>> {
-        // This is the main IOMMU work: IOMMU DMA MAP the memory...
-        if USE_CDEV {
-            return self.map_dma_cdev(ptr, size);
-        }
-
-        // a direct mapping of the user-space virtual address space and the io virtual address space is used => iova = vaddr
-        let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
-            argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
-            flags: IoctlFlag::VFIO_DMA_MAP_FLAG_READ | IoctlFlag::VFIO_DMA_MAP_FLAG_WRITE,
-            vaddr: ptr as u64,
-            iova: ptr as u64,
-            size,
-        };
-
-        ioctl_unsafe!(
-            self.container_fd,
-            IoctlOperation::VFIO_IOMMU_MAP_DMA,
-            &mut iommu_dma_map
-        )?;
-
-        let iova = iommu_dma_map.iova as usize;
-
-        let memory = Dma {
-            virt: ptr.cast::<T>(),
-            phys: iova,
-            size,
-        };
-
-        Ok(memory)
-    }
-
-    fn map_dma_cdev<T>(&self, ptr: *mut libc::c_void, size: usize) -> Result<Dma<T>> {
-        println!("mapping DMA with cdev");
-        let mut map = iommu_ioas_map {
-            size: mem::size_of::<iommu_ioas_map>() as u32,
-            flags: IoctlFlag::IOMMU_IOAS_MAP_WRITEABLE | IoctlFlag::IOMMU_IOAS_MAP_READABLE,
-            ioas_id: self.ioas_id,
-            __reserved: 0,
-            user_va: ptr as u64,
-            length: size as u64,
-            iova: 0,
-        };
-
-        ioctl_unsafe!(self.iommufd, IoctlOperation::IOMMU_IOAS_MAP, &mut map)?;
-
-        Ok(Dma {
-            virt: ptr.cast::<T>(),
-            phys: map.iova as usize,
-            size,
-        })
+        self.iommu.map_dma(ptr, size)
     }
 
     /// Maps a memory region for DMA.
     /// # Errors
     pub fn unmap_dma<T>(&self, dma: &Dma<T>) -> Result<()> {
-        let mut dma_unmap = vfio_iommu_type1_dma_unmap {
-            argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
-            iova: dma.phys as *mut u8,
-            size: dma.size,
-            flags: 0,
-            data: ptr::null_mut(),
-        };
-
-        ioctl_unsafe!(
-            self.container_fd,
-            IoctlOperation::VFIO_IOMMU_UNMAP_DMA,
-            &mut dma_unmap
-        )?;
-
-        Ok(())
+        self.iommu.unmap_dma(dma)
     }
 
     /// Checks if the IOMMU is from Intel.
@@ -482,6 +421,7 @@ impl Vfio {
     }
 
     /// Allocate `size` bytes memory with 1 GiB page size on the host device. Returns pointer to allocated memory, currently only works on 64 bit systems
+    /// This does not work on 32-bit systems, use 2MiB or 4KiB
     fn allocate_1gib(size: usize) -> Result<*mut libc::c_void> {
         mmap_anonymous_unsafe!(size, libc::MAP_HUGETLB | libc::MAP_HUGE_1GB)
     }
@@ -538,15 +478,6 @@ impl Vfio {
         }
     }
 
-    fn allocate_with_pagesize(&self, size: usize) -> Result<*mut libc::c_void> {
-        let page_size = &self.page_size;
-        match page_size {
-            Pagesize::Page4K => Self::allocate_4kib(size),
-            Pagesize::Page1G => Self::allocate_1gib(size),
-            Pagesize::Page2M => Self::allocate_2mib(size),
-        }
-    }
-
     pub fn set_page_size(&mut self, page_size: Pagesize) {
         self.page_size = page_size;
     }
@@ -576,8 +507,11 @@ impl Vfio {
 
 impl Display for Vfio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Vfio {{ pci_addr: {}, device_fd: {}, container_fd: {}, ioas_id: {}, iommufd: {}, page_size: {} }}",
-               self.pci_addr, self.device_fd, self.container_fd, self.ioas_id, self.iommufd, self.page_size)
+        write!(
+            f,
+            "Vfio {{ pci_addr: {}, device_fd: {}, page_size: {:?}, mode: {:?} }}",
+            self.pci_addr, self.device_fd, self.page_size, self.iommu
+        )
     }
 }
 
@@ -585,7 +519,11 @@ impl Mapping for Vfio {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
         let size = self.page_size.shift_up(size);
         // println!("Allocating {} with page_size {}", size, self.page_size);
-        let ptr = self.allocate_with_pagesize(size)?;
+        let ptr = match self.page_size {
+            Pagesize::Page4K => Self::allocate_4kib(size),
+            Pagesize::Page1G => Self::allocate_1gib(size),
+            Pagesize::Page2M => Self::allocate_2mib(size),
+        }?;
         self.map_dma(ptr, size)
     }
 
@@ -604,6 +542,100 @@ impl Mapping for Vfio {
     }
 }
 
-struct VfioGroupMapping {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VfioIommu {
+    Container {
+        container_fd: RawFd,
+    },
+    #[allow(clippy::upper_case_acronyms)]
+    IOMMUFD {
+        ioas_id: u32,
+        iommufd: i32,
+    },
+}
 
-struct VfioCDevMapping {}
+impl VfioIommu {
+    pub fn map_dma<T>(&self, ptr: *mut libc::c_void, size: usize) -> Result<Dma<T>> {
+        match self {
+            Self::Container { container_fd } => {
+                // a direct mapping of the user-space virtual address space and the io virtual address space is used => iova = vaddr
+                let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
+                    argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
+                    flags: IoctlFlag::VFIO_DMA_MAP_FLAG_READ | IoctlFlag::VFIO_DMA_MAP_FLAG_WRITE,
+                    vaddr: ptr as u64,
+                    iova: ptr as u64,
+                    size,
+                };
+
+                ioctl_unsafe!(
+                    *container_fd,
+                    IoctlOperation::VFIO_IOMMU_MAP_DMA,
+                    &mut iommu_dma_map
+                )?;
+
+                let iova = iommu_dma_map.iova as usize;
+
+                let memory = Dma {
+                    virt: ptr.cast::<T>(),
+                    phys: iova,
+                    size,
+                };
+
+                Ok(memory)
+            }
+            Self::IOMMUFD { ioas_id, iommufd } => {
+                let mut map = iommu_ioas_map {
+                    size: mem::size_of::<iommu_ioas_map>() as u32,
+                    flags: IoctlFlag::IOMMU_IOAS_MAP_WRITEABLE | IoctlFlag::IOMMU_IOAS_MAP_READABLE,
+                    ioas_id: *ioas_id,
+                    __reserved: 0,
+                    user_va: ptr as u64,
+                    length: size as u64,
+                    iova: 0,
+                };
+
+                ioctl_unsafe!(*iommufd, IoctlOperation::IOMMU_IOAS_MAP, &mut map)?;
+
+                Ok(Dma {
+                    virt: ptr.cast::<T>(),
+                    phys: map.iova as usize,
+                    size,
+                })
+            }
+        }
+    }
+
+    pub fn unmap_dma<T>(&self, dma: &Dma<T>) -> Result<()> {
+        match self {
+            Self::Container { container_fd } => {
+                let mut dma_unmap = vfio_iommu_type1_dma_unmap {
+                    argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
+                    iova: dma.phys as *mut u8,
+                    size: dma.size,
+                    flags: 0,
+                    data: ptr::null_mut(),
+                };
+
+                ioctl_unsafe!(
+                    *container_fd,
+                    IoctlOperation::VFIO_IOMMU_UNMAP_DMA,
+                    &mut dma_unmap
+                )?;
+
+                Ok(())
+            }
+            Self::IOMMUFD { ioas_id, iommufd } => {
+                let mut ioas_unmap = iommu_ioas_unmap {
+                    size: mem::size_of::<iommu_ioas_unmap>() as u32,
+                    ioas_id: *ioas_id,
+                    iova: dma.phys as u64,
+                    length: dma.size as u64,
+                };
+
+                ioctl_unsafe!(*iommufd, IoctlOperation::IOMMU_IOAS_UNMAP, &mut ioas_unmap)?;
+
+                Ok(())
+            }
+        }
+    }
+}

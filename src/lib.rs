@@ -66,6 +66,8 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice> {
 /// # Errors
 /// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
 pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDevice> {
+    check_nvme(pci_addr);
+
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
     let mut config_file = pci_open_resource_ro(pci_addr, "config").expect("wrong pci address");
@@ -91,8 +93,22 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
     Ok(nvme)
 }
 
-// fn check_nvme(pci_addr: &str) {
-//     if pci_addr == "0000:c4:00.0" {
-//         process::exit(1);
-//     }
-// }
+pub fn check_nvme(pci_addr: &str) {
+    if pci_addr == "0000:c4:00.0" {
+        process::exit(1);
+    }
+
+    let allowed = [
+        "0000:01:00.0",
+        "0000:02:00.0",
+        "0000:03:00.0",
+        "0000:04:00.0",
+        "0000:21:00.0",
+        "0000:22:00.0",
+        "0000:23:00.0",
+        "0000:24:00.0",
+    ];
+    if !allowed.contains(&pci_addr) {
+        process::exit(1);
+    }
+}
