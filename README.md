@@ -11,7 +11,7 @@ For further details take a look at [@bootreer](https://github.com/bootreer)'s [t
 # Build instructions
 
 vroom needs to be compiled from source using rust's package manager `cargo`.
-Vroom uses hugepages, enable them using:
+vroom uses hugepages, enable them using:
 
 ```bash
 cd vroom
@@ -38,7 +38,7 @@ To re-bind the kernel driver after vroom use
 
 # Using the IOMMU
 
-By default, vroom needs root to directly access the NVMe device memory. By using the IOMMU and the Linux VFIO framework, the driver can be run without root privileges while also achieving improved safety.
+By default, vroom needs root to use DMA. By using the IOMMU and the Linux VFIO framework, the driver can be run without root privileges while also achieving improved safety.
 
 1. Enable the IOMMU in the BIOS. On most Intel machines, the BIOS entry is called `VT-d` and has to be enabled in addition to any other virtualization technique.
 2. Enable the IOMMU in the linux kernel. Add `intel_iommu=on` to your cmdline (if you are running a grub, the file `/etc/default/grub.cfg` contains a `GRUB_CMDLINE_LINUX` where you can add it).
@@ -47,7 +47,13 @@ From step 3 you can either use a provided script or continue manually.
 To bind the vfio driver using the script execute
 
 ```bash
-./scripts/bind-vfio-driver.sh <pci_address> <user> <group>
+./scripts/bind-vfio-driver.sh <pci_address> 
+```
+
+To make the driver run without root use
+
+```bash
+chown $user:$group /dev/vfio/*
 ```
 
 To unbind the vfio driver use
