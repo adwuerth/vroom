@@ -12,11 +12,11 @@ mod error;
 pub mod mapping;
 #[allow(dead_code)]
 pub mod memory;
-mod mmio;
 #[allow(dead_code)]
 mod nvme;
 #[allow(dead_code)]
 mod pci;
+mod physical;
 #[allow(dead_code)]
 mod queues;
 pub mod vfio;
@@ -38,7 +38,7 @@ pub use memory::PAGESIZE_2MIB;
 pub use memory::PAGESIZE_4KIB;
 
 pub use mapping::Mapping;
-pub use mapping::MemoryMapping;
+pub use mapping::MemoryAccess;
 
 pub use nvme::{NvmeDevice, NvmeQueuePair};
 use pci::{pci_open_resource_ro, read_hex, read_io32};
@@ -66,8 +66,6 @@ pub fn init(pci_addr: &str) -> Result<NvmeDevice> {
 /// # Errors
 /// Returns an error if the device is not a block device/nvme, or if the device can not be initialised
 pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDevice> {
-    check_nvme(pci_addr);
-
     let mut vendor_file = pci_open_resource_ro(pci_addr, "vendor").expect("wrong pci address");
     let mut device_file = pci_open_resource_ro(pci_addr, "device").expect("wrong pci address");
     let mut config_file = pci_open_resource_ro(pci_addr, "config").expect("wrong pci address");
@@ -82,7 +80,7 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
         return Err(format!("device {pci_addr} is not a block device").into());
     }
 
-    let allocator = MemoryMapping::init_with_page_size(pci_addr, page_size)?;
+    let allocator = MemoryAccess::init_with_page_size(pci_addr, page_size)?;
     let mut nvme = NvmeDevice::init(pci_addr, Box::new(allocator))?;
     nvme.identify_controller_print()?;
     let ns = nvme.identify_namespace_list(0);
@@ -91,24 +89,4 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
         nvme.identify_namespace(n);
     }
     Ok(nvme)
-}
-
-pub fn check_nvme(pci_addr: &str) {
-    if pci_addr == "0000:c4:00.0" {
-        process::exit(1);
-    }
-
-    let allowed = [
-        "0000:01:00.0",
-        "0000:02:00.0",
-        "0000:03:00.0",
-        "0000:04:00.0",
-        "0000:21:00.0",
-        "0000:22:00.0",
-        "0000:23:00.0",
-        "0000:24:00.0",
-    ];
-    if !allowed.contains(&pci_addr) {
-        process::exit(1);
-    }
 }

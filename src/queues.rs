@@ -1,5 +1,5 @@
 use crate::cmd::NvmeCommand;
-use crate::mapping::{Mapping, MemoryMapping};
+use crate::mapping::{Mapping, MemoryAccess};
 use crate::memory::Dma;
 use crate::{Result, PAGESIZE_2MIB};
 use std::hint::spin_loop;
@@ -29,8 +29,8 @@ pub struct NvmeCompletion {
 // pub const QUEUE_LENGTH: usize = 1024;
 // pub const QUEUE_LENGTH: usize = 65536;
 // pub const QUEUE_LENGTH: usize = PAGESIZE_2MIB / mem::size_of::<NvmeCommand>();
-// pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
-pub const QUEUE_LENGTH: usize = 64;
+pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
+// pub const QUEUE_LENGTH: usize = 64;
 
 // pub const QUEUE_LENGTH: usize = 65536;
 
@@ -49,7 +49,7 @@ pub struct SubmissionQueue {
 }
 
 impl SubmissionQueue {
-    pub fn new(allocator: &MemoryMapping, len: usize, doorbell: usize) -> Result<Self> {
+    pub fn new(allocator: &MemoryAccess, len: usize, doorbell: usize) -> Result<Self> {
         let commands = allocator.allocate(mem::size_of::<NvmeCommand>() * QUEUE_LENGTH)?;
 
         Ok(Self {
@@ -106,7 +106,7 @@ pub struct CompletionQueue {
 
 // TODO: error handling
 impl CompletionQueue {
-    pub fn new(allocator: &MemoryMapping, len: usize, doorbell: usize) -> Result<Self> {
+    pub fn new(allocator: &MemoryAccess, len: usize, doorbell: usize) -> Result<Self> {
         let commands = allocator.allocate(mem::size_of::<NvmeCompletion>() * QUEUE_LENGTH)?;
         Ok(Self {
             commands,

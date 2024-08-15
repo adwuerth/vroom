@@ -1,5 +1,5 @@
 use crate::cmd::NvmeCommand;
-use crate::mapping::{Mapping, MemoryMapping};
+use crate::mapping::{Mapping, MemoryAccess};
 use crate::memory::{Dma, DmaSlice, Pagesize};
 use crate::queues::{CompletionQueue, NvmeCompletion, SubmissionQueue, QUEUE_LENGTH};
 use crate::Result;
@@ -256,7 +256,7 @@ pub struct NvmeDevice {
     pub namespaces: HashMap<u32, NvmeNamespace>,
     pub stats: NvmeStats,
     q_id: u16,
-    pub allocator: Box<MemoryMapping>,
+    pub allocator: Box<MemoryAccess>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -288,10 +288,10 @@ impl NvmeDevice {
     /// # Arguments
     /// * `pci_addr` - pci address of the device
     /// # Errors
-    pub fn init(pci_addr: &str, allocator: Box<MemoryMapping>) -> Result<Self> {
+    pub fn init(pci_addr: &str, allocator: Box<MemoryAccess>) -> Result<Self> {
         // let allocator: IOAllocator = IOAllocator::init(pci_addr)?;
 
-        // Map the device's resource0
+        // Map the device's BAR
         let (addr, len) = allocator.map_resource()?;
 
         let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE.load(Ordering::Relaxed))?;

@@ -1,5 +1,5 @@
 use crate::memory::{Dma, Pagesize, DEFAULT_PAGE_SIZE};
-use crate::mmio::Mmio;
+use crate::physical::Physical;
 use crate::vfio::Vfio;
 use crate::Result;
 pub trait Mapping {
@@ -17,12 +17,12 @@ pub trait Mapping {
 }
 
 /// `IOAllocators` UIO and VFIO, is necessary such that trait Allocating can be used as a object
-pub enum MemoryMapping {
-    Mmio(Mmio),
+pub enum MemoryAccess {
+    Physical(Physical),
     Vfio(Vfio),
 }
 
-impl MemoryMapping {
+impl MemoryAccess {
     /// Returns either UIO or VFIO, depending on if vfio is enabled
     /// # Errors
     pub fn init(pci_addr: &str) -> Result<Self> {
@@ -40,7 +40,7 @@ impl MemoryMapping {
             if unsafe { libc::getuid() } != 0 {
                 println!("not running as root, this will probably fail");
             }
-            Self::Mmio(Mmio::init_with_args(pci_addr, page_size)?)
+            Self::Physical(Physical::init_with_args(pci_addr, page_size)?)
         })
     }
 
@@ -51,24 +51,24 @@ impl MemoryMapping {
     }
 }
 
-impl Mapping for MemoryMapping {
+impl Mapping for MemoryAccess {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
         match self {
-            Self::Mmio(mmio) => mmio.allocate(size),
+            Self::Physical(mmio) => mmio.allocate(size),
             Self::Vfio(vfio) => vfio.allocate(size),
         }
     }
 
     fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
         match self {
-            Self::Mmio(mmio) => mmio.deallocate(dma),
+            Self::Physical(mmio) => mmio.deallocate(dma),
             Self::Vfio(vfio) => vfio.deallocate(dma),
         }
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize)> {
         match self {
-            Self::Mmio(mmio) => mmio.map_resource(),
+            Self::Physical(mmio) => mmio.map_resource(),
             Self::Vfio(vfio) => vfio.map_resource(),
         }
     }

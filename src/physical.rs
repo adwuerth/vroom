@@ -15,12 +15,13 @@ static HUGEPAGE_ID: AtomicUsize = AtomicUsize::new(0);
 use crate::{mlock_unsafe, mmap_fd_unsafe, munlock_unsafe, munmap_unsafe, Result};
 use crate::{mmap_unsafe, Error};
 
-pub struct Mmio {
+/// Using Physical, DMA is performed with physical addresses on hugepages, access to the device is done through sysfs
+pub struct Physical {
     pci_addr: String,
     page_size: Pagesize,
 }
 
-impl Mmio {
+impl Physical {
     pub fn init(pci_addr: &str) -> Result<Self> {
         Self::init_with_args(pci_addr, memory::DEFAULT_PAGE_SIZE)
     }
@@ -44,10 +45,6 @@ impl Mmio {
                 "The device is not bound to Pci-Stub!".to_string(),
             ));
         }
-
-        // mmio.bind_to_stub_driver()?;
-
-        // mmio.unbind_driver()?;
 
         mmio.enable_dma()?;
 
@@ -82,36 +79,6 @@ impl Mmio {
         Ok(false)
     }
 
-    // todo check if this works
-    // fn bind_to_stub_driver(&self) -> Result<()> {
-    //     let vendor_path = format!("/sys/bus/pci/devices/{}/vendor", self.pci_addr);
-    //     let device_path = format!("/sys/bus/pci/devices/{}/device", self.pci_addr);
-
-    //     let vendor = fs::read_to_string(vendor_path)?;
-    //     let device = fs::read_to_string(device_path)?;
-
-    //     let nvme_vd = format!("{vendor} {device}");
-
-    //     println!("now trying to bind to pci-stub");
-
-    //     let unbind_path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
-    //     let mut file = fs::OpenOptions::new().write(true).open(unbind_path)?;
-    //     file.write_all(self.pci_addr.as_bytes())?;
-    //     println!("unbound driver");
-
-    //     // let new_id_path = "/sys/bus/pci/drivers/pci-stub/new_id";
-    //     // let mut file = fs::OpenOptions::new().write(true).open(new_id_path)?;
-    //     // file.write_all(nvme_vd.as_bytes())?;
-    //     // println!("set new id");
-
-    //     let bind_path = "/sys/bus/pci/drivers/pci-stub/bind";
-    //     let mut file = fs::OpenOptions::new().write(true).open(bind_path)?;
-    //     file.write_all(self.pci_addr.as_bytes())?;
-    //     println!("bound to pci-stub");
-
-    //     Ok(())
-    // }
-
     /// Translates a virtual address to its physical counterpart
     fn virt_to_phys(addr: usize) -> Result<usize> {
         let pagesize = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
@@ -143,16 +110,6 @@ impl Mmio {
         Ok(())
     }
 
-    /// Unbinds kernel driver
-    // pub fn unbind_driver(&self) -> Result<()> {
-    //     let path = format!("/sys/bus/pci/devices/{}/driver/unbind", self.pci_addr);
-
-    //     let mut file = fs::OpenOptions::new().write(true).open(path)?;
-    //     write!(file, "{}", self.pci_addr)?;
-
-    //     Ok(())
-    // }
-
     /// Disable `INTx` interrupts for the device.
     pub fn disable_interrupts(&self) -> Result<()> {
         let path = format!("/sys/bus/pci/devices/{}/config", self.pci_addr);
@@ -166,14 +123,14 @@ impl Mmio {
     }
 }
 
-impl Mapping for Mmio {
+impl Mapping for Physical {
     fn allocate<T>(&self, size: usize) -> Result<Dma<T>> {
         let size = self.page_size.shift_up(size);
 
         let id = HUGEPAGE_ID.fetch_add(1, Ordering::SeqCst);
 
         let path = format!("/mnt/huge/nvme-{}-{}", process::id(), id);
-        println!("allocating: {path}");
+        // println!("allocating: {path}");
         let res = fs::OpenOptions::new()
             .read(true)
             .write(true)

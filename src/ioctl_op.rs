@@ -3,7 +3,7 @@
 use std::fmt;
 
 #[derive(Debug)]
-pub enum IoctlOperation {
+pub enum IoctlOp {
     // VFIO constants
     VFIO_GET_API_VERSION,
     VFIO_CHECK_EXTENSION,
@@ -33,7 +33,7 @@ pub enum IoctlOperation {
     IOMMU_IOAS_UNMAP,
 }
 
-impl IoctlOperation {
+impl IoctlOp {
     const _IOC_TYPESHIFT: u64 = 8;
     const _IOC_NRSHIFT: u64 = 0;
 
@@ -80,7 +80,7 @@ impl IoctlOperation {
     }
 }
 
-impl fmt::Display for IoctlOperation {
+impl fmt::Display for IoctlOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")
     }

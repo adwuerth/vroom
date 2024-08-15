@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(clippy::must_use_candidate)]
 
-use crate::ioctl_op::{IoctlFlag, IoctlOperation};
+use crate::ioctl_op::{IoctlFlag, IoctlOp};
 use crate::mapping::Mapping;
 use crate::{
     ioctl_unsafe, mmap_anonymous_unsafe, mmap_unsafe, munmap_unsafe, pread_unsafe, pwrite_unsafe,
@@ -48,7 +48,7 @@ pub struct Vfio {
     pci_addr: String,
     device_fd: RawFd,
     page_size: Pagesize,
-    iommu: VfioIommu,
+    iommu: VfioBackend,
 }
 
 /// Implementation of Linux VFIO framework for direct device access.
@@ -106,7 +106,7 @@ impl Vfio {
         let container_fd = container_file.into_raw_fd();
 
         // check if the container's API version is the same as the VFIO API's
-        let api_version = ioctl_unsafe!(container_fd, IoctlOperation::VFIO_GET_API_VERSION)?;
+        let api_version = ioctl_unsafe!(container_fd, IoctlOp::VFIO_GET_API_VERSION)?;
         if api_version != Self::VFIO_API_VERSION {
             return Err(Error::Vfio("Unknown VFIO API Version".to_string()));
         }
@@ -114,7 +114,7 @@ impl Vfio {
         // check if type1 is supported
         let res = ioctl_unsafe!(
             container_fd,
-            IoctlOperation::VFIO_CHECK_EXTENSION,
+            IoctlOp::VFIO_CHECK_EXTENSION,
             Self::VFIO_TYPE1_IOMMU
         );
         res.map_err(|e| Error::Vfio(format!("Container doesn't support Type1 IOMMU: {e}")))?;
@@ -149,11 +149,7 @@ impl Vfio {
             let group_fd = group_file.into_raw_fd();
 
             // Test the group is viable and available
-            ioctl_unsafe!(
-                group_fd,
-                IoctlOperation::VFIO_GROUP_GET_STATUS,
-                &mut group_status
-            )?;
+            ioctl_unsafe!(group_fd, IoctlOp::VFIO_GROUP_GET_STATUS, &mut group_status)?;
 
             if (group_status.flags & IoctlFlag::VFIO_GROUP_FLAGS_VIABLE) != 1 {
                 return Err(
@@ -163,11 +159,7 @@ impl Vfio {
             }
 
             // Add the group to the container
-            ioctl_unsafe!(
-                group_fd,
-                IoctlOperation::VFIO_GROUP_SET_CONTAINER,
-                &container_fd
-            )?;
+            ioctl_unsafe!(group_fd, IoctlOp::VFIO_GROUP_SET_CONTAINER, &container_fd)?;
 
             vfio_gfds.insert(group, group_fd);
 
@@ -177,13 +169,12 @@ impl Vfio {
         // Enable the IOMMU model we want
         ioctl_unsafe!(
             container_fd,
-            IoctlOperation::VFIO_SET_IOMMU,
+            IoctlOp::VFIO_SET_IOMMU,
             Self::VFIO_TYPE1_IOMMU
         )?;
 
         // Get a file descriptor for the device
-        let device_fd =
-            ioctl_unsafe!(group_fd, IoctlOperation::VFIO_GROUP_GET_DEVICE_FD, pci_addr)?;
+        let device_fd = ioctl_unsafe!(group_fd, IoctlOp::VFIO_GROUP_GET_DEVICE_FD, pci_addr)?;
 
         let mut iommu_info: vfio_iommu_type1_info = vfio_iommu_type1_info {
             argsz: mem::size_of::<vfio_iommu_type1_info>() as u32,
@@ -193,18 +184,14 @@ impl Vfio {
             pad: 0,
         };
 
-        ioctl_unsafe!(
-            container_fd,
-            IoctlOperation::VFIO_IOMMU_GET_INFO,
-            &mut iommu_info
-        )?;
+        ioctl_unsafe!(container_fd, IoctlOp::VFIO_IOMMU_GET_INFO, &mut iommu_info)?;
 
         // println!(
         //     "IOMMU page sizes: {:b} {:x} {}",
         //     iommu_info.iova_pgsizes, iommu_info.iova_pgsizes, iommu_info.iova_pgsizes
         // );
 
-        let mode = VfioIommu::Container { container_fd };
+        let mode = VfioBackend::Legacy { container_fd };
 
         let vfio = Self {
             pci_addr: pci_addr.to_string(),
@@ -259,19 +246,19 @@ impl Vfio {
             pt_id: 0,
         };
 
-        ioctl_unsafe!(cdev_fd, IoctlOperation::VFIO_DEVICE_BIND_IOMMUFD, &mut bind)?;
+        ioctl_unsafe!(cdev_fd, IoctlOp::VFIO_DEVICE_BIND_IOMMUFD, &mut bind)?;
 
-        ioctl_unsafe!(iommufd, IoctlOperation::IOMMU_IOAS_ALLOC, &mut alloc_data)?;
+        ioctl_unsafe!(iommufd, IoctlOp::IOMMU_IOAS_ALLOC, &mut alloc_data)?;
 
         attach_data.pt_id = alloc_data.out_ioas_id;
 
         ioctl_unsafe!(
             cdev_fd,
-            IoctlOperation::VFIO_DEVICE_ATTACH_IOMMUFD_PT,
+            IoctlOp::VFIO_DEVICE_ATTACH_IOMMUFD_PT,
             &mut attach_data
         )?;
 
-        let mode = VfioIommu::IOMMUFD {
+        let mode = VfioBackend::IOMMUFD {
             ioas_id: (alloc_data.out_ioas_id),
             iommufd: (iommufd),
         };
@@ -321,7 +308,7 @@ impl Vfio {
 
         ioctl_unsafe!(
             self.device_fd,
-            IoctlOperation::VFIO_DEVICE_GET_REGION_INFO,
+            IoctlOp::VFIO_DEVICE_GET_REGION_INFO,
             &mut conf_reg
         )?;
 
@@ -363,7 +350,7 @@ impl Vfio {
 
         ioctl_unsafe!(
             self.device_fd,
-            IoctlOperation::VFIO_DEVICE_GET_REGION_INFO,
+            IoctlOp::VFIO_DEVICE_GET_REGION_INFO,
             &mut region_info
         )?;
 
@@ -381,18 +368,6 @@ impl Vfio {
         let addr = ptr.cast::<u8>();
 
         Ok((addr, len))
-    }
-
-    // Maps a memory region for DMA.
-    /// # Errors
-    pub fn map_dma<T>(&self, ptr: *mut libc::c_void, size: usize) -> Result<Dma<T>> {
-        self.iommu.map_dma(ptr, size)
-    }
-
-    /// Maps a memory region for DMA.
-    /// # Errors
-    pub fn unmap_dma<T>(&self, dma: &Dma<T>) -> Result<()> {
-        self.iommu.unmap_dma(dma)
     }
 
     /// Checks if the IOMMU is from Intel.
@@ -524,7 +499,7 @@ impl Mapping for Vfio {
             Pagesize::Page1G => Self::allocate_1gib(size),
             Pagesize::Page2M => Self::allocate_2mib(size),
         }?;
-        self.map_dma(ptr, size)
+        self.iommu.map_dma(ptr, size)
     }
 
     fn map_resource(&self) -> Result<(*mut u8, usize)> {
@@ -532,7 +507,7 @@ impl Mapping for Vfio {
     }
 
     fn deallocate<T>(&self, dma: &Dma<T>) -> Result<()> {
-        self.unmap_dma(dma)?;
+        self.iommu.unmap_dma(dma)?;
 
         let size = self.page_size.shift_up(dma.size);
 
@@ -543,23 +518,23 @@ impl Mapping for Vfio {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum VfioIommu {
-    Container {
+enum VfioBackend {
+    Legacy {
         container_fd: RawFd,
     },
     #[allow(clippy::upper_case_acronyms)]
     IOMMUFD {
         ioas_id: u32,
-        iommufd: i32,
+        iommufd: RawFd,
     },
 }
 
-impl VfioIommu {
+impl VfioBackend {
     pub fn map_dma<T>(&self, ptr: *mut libc::c_void, size: usize) -> Result<Dma<T>> {
         match self {
-            Self::Container { container_fd } => {
+            Self::Legacy { container_fd } => {
                 // a direct mapping of the user-space virtual address space and the io virtual address space is used => iova = vaddr
-                let mut iommu_dma_map: vfio_iommu_type1_dma_map = vfio_iommu_type1_dma_map {
+                let mut iommu_dma_map = vfio_iommu_type1_dma_map {
                     argsz: mem::size_of::<vfio_iommu_type1_dma_map>() as u32,
                     flags: IoctlFlag::VFIO_DMA_MAP_FLAG_READ | IoctlFlag::VFIO_DMA_MAP_FLAG_WRITE,
                     vaddr: ptr as u64,
@@ -569,7 +544,7 @@ impl VfioIommu {
 
                 ioctl_unsafe!(
                     *container_fd,
-                    IoctlOperation::VFIO_IOMMU_MAP_DMA,
+                    IoctlOp::VFIO_IOMMU_MAP_DMA,
                     &mut iommu_dma_map
                 )?;
 
@@ -584,7 +559,7 @@ impl VfioIommu {
                 Ok(memory)
             }
             Self::IOMMUFD { ioas_id, iommufd } => {
-                let mut map = iommu_ioas_map {
+                let mut ioas_map = iommu_ioas_map {
                     size: mem::size_of::<iommu_ioas_map>() as u32,
                     flags: IoctlFlag::IOMMU_IOAS_MAP_WRITEABLE | IoctlFlag::IOMMU_IOAS_MAP_READABLE,
                     ioas_id: *ioas_id,
@@ -594,11 +569,11 @@ impl VfioIommu {
                     iova: 0,
                 };
 
-                ioctl_unsafe!(*iommufd, IoctlOperation::IOMMU_IOAS_MAP, &mut map)?;
+                ioctl_unsafe!(*iommufd, IoctlOp::IOMMU_IOAS_MAP, &mut ioas_map)?;
 
                 Ok(Dma {
                     virt: ptr.cast::<T>(),
-                    phys: map.iova as usize,
+                    phys: ioas_map.iova as usize,
                     size,
                 })
             }
@@ -607,7 +582,7 @@ impl VfioIommu {
 
     pub fn unmap_dma<T>(&self, dma: &Dma<T>) -> Result<()> {
         match self {
-            Self::Container { container_fd } => {
+            Self::Legacy { container_fd } => {
                 let mut dma_unmap = vfio_iommu_type1_dma_unmap {
                     argsz: mem::size_of::<vfio_iommu_type1_dma_unmap>() as u32,
                     iova: dma.phys as *mut u8,
@@ -616,11 +591,7 @@ impl VfioIommu {
                     data: ptr::null_mut(),
                 };
 
-                ioctl_unsafe!(
-                    *container_fd,
-                    IoctlOperation::VFIO_IOMMU_UNMAP_DMA,
-                    &mut dma_unmap
-                )?;
+                ioctl_unsafe!(*container_fd, IoctlOp::VFIO_IOMMU_UNMAP_DMA, &mut dma_unmap)?;
 
                 Ok(())
             }
@@ -632,7 +603,7 @@ impl VfioIommu {
                     length: dma.size as u64,
                 };
 
-                ioctl_unsafe!(*iommufd, IoctlOperation::IOMMU_IOAS_UNMAP, &mut ioas_unmap)?;
+                ioctl_unsafe!(*iommufd, IoctlOp::IOMMU_IOAS_UNMAP, &mut ioas_unmap)?;
 
                 Ok(())
             }
