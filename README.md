@@ -5,7 +5,7 @@ As an userspace driver which (optionally) uses VFIO, it can be run without root 
 It aims to be as fast as the SPDK NVMe driver, while minimizing unsafe code and offering a simplified API.
 vroom currently serves as a proof of concept and has many features yet to be implemented.
 
-For further details take a look at [@bootreer](https://github.com/bootreer)'s [thesis](https://db.in.tum.de/people/sites/ellmann/theses/finished/24/pirhonen_writing_an_nvme_driver_in_rust.pdf) on vroom
+For further details take a look at [@bootreer](https://github.com/bootreer)'s [thesis](https://db.in.tum.de/people/sites/ellmann/theses/finished/24/pirhonen_writing_an_nvme_driver_in_rust.pdf) on vroom, or my [thesis](https://db.in.tum.de/~ellmann/theses/finished/24/wuerth_effects_of_linux_vfio.pdf) for the VFIO implementation.
 
 
 # Build instructions
