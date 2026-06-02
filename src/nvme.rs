@@ -256,6 +256,7 @@ pub struct NvmeDevice {
     pub namespaces: HashMap<u32, NvmeNamespace>,
     pub stats: NvmeStats,
     q_id: u16,
+    max_entries: usize,
     pub allocator: Box<MemoryAccess>,
 }
 
@@ -297,22 +298,24 @@ impl NvmeDevice {
         let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE.load(Ordering::Relaxed))?;
         let prp_list: Dma<[u64; 512]> = allocator.allocate(PRP_LIST_SIZE)?;
 
+        // CAP: bits 15:0 = MQES (max queue entries, 0-based), bits 35:32 = DSTRD.
+        let cap = unsafe {
+            std::ptr::read_volatile((addr as usize + NvmeRegs64::CAP as usize) as *const u64)
+        };
+        let max_entries = ((cap & 0xFFFF) as usize) + 1;
+
+        let queue_len = QUEUE_LENGTH.min(max_entries);
+
         let mut dev = Self {
             pci_addr: pci_addr.to_string(),
             addr,
-            dstrd: {
-                unsafe {
-                    ((std::ptr::read_volatile(
-                        (addr as usize + NvmeRegs64::CAP as usize) as *const u64,
-                    ) >> 32)
-                        & 0b1111) as u16
-                }
-            },
+            dstrd: ((cap >> 32) & 0b1111) as u16,
             len,
-            admin_sq: SubmissionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            admin_cq: CompletionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            io_sq: SubmissionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
-            io_cq: CompletionQueue::new(&allocator, QUEUE_LENGTH, 0)?,
+            max_entries,
+            admin_sq: SubmissionQueue::new(&allocator, queue_len, 0)?,
+            admin_cq: CompletionQueue::new(&allocator, queue_len, 0)?,
+            io_sq: SubmissionQueue::new(&allocator, queue_len, 0)?,
+            io_cq: CompletionQueue::new(&allocator, queue_len, 0)?,
             buffer,
             prp_list,
             namespaces: HashMap::new(),
@@ -353,7 +356,7 @@ impl NvmeDevice {
         dev.set_reg64(NvmeRegs64::ACQ as u32, dev.admin_cq.get_addr() as u64);
         dev.set_reg32(
             NvmeRegs32::AQA as u32,
-            (QUEUE_LENGTH as u32 - 1) << 16 | (QUEUE_LENGTH as u32 - 1),
+            (queue_len as u32 - 1) << 16 | (queue_len as u32 - 1),
         );
 
         // Configure other stuff
@@ -388,18 +391,12 @@ impl NvmeDevice {
         let addr = dev.io_cq.get_addr();
         println!("Requesting i/o completion queue");
         let comp = dev.submit_and_complete_admin(|c_id, _| {
-            NvmeCommand::create_io_completion_queue(c_id, q_id, addr, (QUEUE_LENGTH - 1) as u16)
+            NvmeCommand::create_io_completion_queue(c_id, q_id, addr, (queue_len - 1) as u16)
         })?;
         let addr = dev.io_sq.get_addr();
         println!("Requesting i/o submission queue");
         let comp = dev.submit_and_complete_admin(|c_id, _| {
-            NvmeCommand::create_io_submission_queue(
-                c_id,
-                q_id,
-                addr,
-                (QUEUE_LENGTH - 1) as u16,
-                q_id,
-            )
+            NvmeCommand::create_io_submission_queue(c_id, q_id, addr, (queue_len - 1) as u16, q_id)
         })?;
         dev.q_id += 1;
 
@@ -460,6 +457,7 @@ impl NvmeDevice {
     /// # Panics
     /// # Errors
     pub fn create_io_queue_pair(&mut self, len: usize) -> Result<NvmeQueuePair> {
+        let len = len.min(self.max_entries);
         let q_id = self.q_id;
         // println!("Requesting i/o queue pair with id {q_id}");
 

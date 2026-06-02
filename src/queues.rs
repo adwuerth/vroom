@@ -25,16 +25,7 @@ pub struct NvmeCompletion {
     pub status: u16,
 }
 
-/// maximum amount of submission entries on a 2MiB huge page
 pub const QUEUE_LENGTH: usize = 1024;
-// pub const QUEUE_LENGTH: usize = 65536;
-// pub const QUEUE_LENGTH: usize = PAGESIZE_2MIB / mem::size_of::<NvmeCommand>();
-// pub const QUEUE_LENGTH: usize = 64;
-
-// pub const QUEUE_LENGTH: usize = 65536;
-
-// static QUEUE_LENGTH: AtomicUsize =
-//     AtomicUsize::new((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
 
 /// Submission queue
 pub struct SubmissionQueue {
@@ -49,13 +40,13 @@ pub struct SubmissionQueue {
 
 impl SubmissionQueue {
     pub fn new(allocator: &MemoryAccess, len: usize, doorbell: usize) -> Result<Self> {
-        let commands = allocator.allocate(mem::size_of::<NvmeCommand>() * QUEUE_LENGTH)?;
+        let commands = allocator.allocate(mem::size_of::<NvmeCommand>() * len)?;
 
         Ok(Self {
             commands,
             head: 0,
             tail: 0,
-            len: len.min(QUEUE_LENGTH),
+            len,
             doorbell,
         })
     }
@@ -78,12 +69,13 @@ impl SubmissionQueue {
 
     // #[inline(always)]
     pub fn submit(&mut self, entry: NvmeCommand) -> usize {
-        // println!("SUBMISSION ENTRY: {:?}", entry);
-        // self.commands[self.tail] = entry;
-
-        let ptr = self.commands.virt;
-        let array_ptr = ptr.cast::<[NvmeCommand; QUEUE_LENGTH]>();
-        (unsafe { &mut *array_ptr })[self.tail] = entry;
+        unsafe {
+            self.commands
+                .virt
+                .cast::<NvmeCommand>()
+                .add(self.tail)
+                .write(entry);
+        }
 
         self.tail = (self.tail + 1) % self.len;
         self.tail
@@ -96,7 +88,7 @@ impl SubmissionQueue {
 
 /// Completion queue
 pub struct CompletionQueue {
-    pub(crate) commands: Dma<[NvmeCompletion; QUEUE_LENGTH]>,
+    pub(crate) commands: Dma<NvmeCompletion>,
     head: usize,
     phase: bool,
     len: usize,
@@ -106,18 +98,18 @@ pub struct CompletionQueue {
 // TODO: error handling
 impl CompletionQueue {
     pub fn new(allocator: &MemoryAccess, len: usize, doorbell: usize) -> Result<Self> {
-        let commands = allocator.allocate(mem::size_of::<NvmeCompletion>() * QUEUE_LENGTH)?;
+        let commands = allocator.allocate(mem::size_of::<NvmeCompletion>() * len)?;
         Ok(Self {
             commands,
             head: 0,
             phase: true,
-            len: len.min(QUEUE_LENGTH),
+            len,
             doorbell,
         })
     }
 
     pub fn complete(&mut self) -> Option<(usize, NvmeCompletion, usize)> {
-        let entry = &self.commands[self.head];
+        let entry = unsafe { self.commands.virt.add(self.head).read() };
 
         if ((entry.status & 1) == 1) == self.phase {
             let prev = self.head;
@@ -125,7 +117,7 @@ impl CompletionQueue {
             if self.head == 0 {
                 self.phase = !self.phase;
             }
-            Some((self.head, *entry, prev))
+            Some((self.head, entry, prev))
         } else {
             None
         }
