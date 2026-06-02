@@ -1,7 +1,7 @@
 use crate::cmd::NvmeCommand;
 use crate::mapping::{Mapping, MemoryAccess};
 use crate::memory::Dma;
-use crate::{Result, PAGESIZE_2MIB};
+use crate::Result;
 use std::hint::spin_loop;
 use std::mem;
 
@@ -26,10 +26,9 @@ pub struct NvmeCompletion {
 }
 
 /// maximum amount of submission entries on a 2MiB huge page
-// pub const QUEUE_LENGTH: usize = 1024;
+pub const QUEUE_LENGTH: usize = 1024;
 // pub const QUEUE_LENGTH: usize = 65536;
 // pub const QUEUE_LENGTH: usize = PAGESIZE_2MIB / mem::size_of::<NvmeCommand>();
-pub const QUEUE_LENGTH: usize = ((PAGESIZE_2MIB / mem::size_of::<NvmeCommand>()) >> 1);
 // pub const QUEUE_LENGTH: usize = 64;
 
 // pub const QUEUE_LENGTH: usize = 65536;
