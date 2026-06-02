@@ -520,7 +520,6 @@ impl NvmeDevice {
 
         // TODO: idk bout this/don't hardcode len
         let data: &[u32] =
-            // unsafe { std::slice::from_raw_parts(self.buffer.virt.as_ptr() as *const u32, 1024) };
             unsafe { std::slice::from_raw_parts(self.buffer.virt as *const u32, 1024) };
 
         data.iter()
