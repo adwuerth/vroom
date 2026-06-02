@@ -134,7 +134,7 @@ impl Mapping for Physical {
         let res = fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true)
+            .create_new(true)
             .open(&path);
 
         let file = match res {
@@ -147,9 +147,17 @@ impl Mapping for Physical {
             }
         };
 
+        if let Err(error) = file.set_len(size as u64) {
+            return Err(Error::Io(error));
+        }
+
         let ptr = mmap_fd_unsafe!(size, self.page_size.mmap_flags(), file.as_raw_fd())?;
 
         mlock_unsafe!(ptr, size)?;
+
+        if let Err(error) = fs::remove_file(&path) {
+            eprintln!("warning: could not unlink huge page file {path}: {error}");
+        }
 
         Ok(Dma {
             virt: ptr.cast::<T>(),
