@@ -2,7 +2,7 @@ use std::error::Error;
 use std::str;
 use std::{env, process};
 use vroom::memory::{Dma, Pagesize};
-use vroom::{Mapping, PAGESIZE_4KIB};
+use vroom::{Mapping, PAGESIZE_2MIB};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
@@ -20,11 +20,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let lba = 0;
 
     // Initialize NVMe Driver
-    let mut nvme = vroom::init_with_page_size(&pci_addr, Pagesize::Page4K)?;
+    let mut nvme = vroom::init_with_page_size(&pci_addr, Pagesize::Page2M)?;
 
     // Add Test bytes and copy to DMA
     let bytes: &[u8] = "hello world! vroom test bytes".as_bytes();
-    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_4KIB)?;
+    let mut buffer: Dma<u8> = nvme.allocate(PAGESIZE_2MIB)?;
     buffer[..bytes.len()].copy_from_slice(bytes);
 
     // Write the bytes to the NVMe memory
