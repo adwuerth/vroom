@@ -86,7 +86,7 @@ pub fn init_with_page_size(pci_addr: &str, page_size: Pagesize) -> Result<NvmeDe
     let ns = nvme.identify_namespace_list(0);
     for n in ns {
         println!("ns_id: {n}");
-        nvme.identify_namespace(n);
+        nvme.identify_namespace(n)?;
     }
     Ok(nvme)
 }

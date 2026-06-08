@@ -6,7 +6,6 @@ use crate::Result;
 use crate::{PAGESIZE_2MIB, PAGESIZE_4KIB};
 use std::collections::HashMap;
 use std::hint::spin_loop;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 #[allow(unused, clippy::upper_case_acronyms)]
@@ -96,6 +95,7 @@ pub struct NvmeQueuePair {
     pub id: u16,
     pub sub_queue: SubmissionQueue,
     comp_queue: CompletionQueue,
+    block_size: u64,
 }
 
 unsafe impl Send for NvmeQueuePair {}
@@ -105,9 +105,9 @@ impl NvmeQueuePair {
     pub fn submit_io(&mut self, data: &impl DmaSlice, mut lba: u64, write: bool) -> usize {
         let mut reqs = 0;
         for chunk in data.chunks(2 * 4096) {
-            let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
+            let blocks = (chunk.slice.len() as u64).div_ceil(self.block_size);
             let addr = chunk.phys_addr as u64;
-            let bytes = blocks * 512;
+            let bytes = blocks * self.block_size;
             let (ptr0, ptr1) = build_prp(addr, bytes, None);
 
             let entry = if write {
@@ -246,8 +246,8 @@ pub struct NvmeDevice {
     admin_cq: CompletionQueue,
     io_sq: SubmissionQueue,
     io_cq: CompletionQueue,
-    buffer: Dma<u8>,           // 2MiB of buffer
-    prp_list: Dma<[u64; 512]>, // Address of PRP's, devices doesn't necessarily support 2MiB page sizes; 8 Bytes * 512 = 4096
+    buffer: Dma<u8>,           // internal staging buffer, BUFFER_SIZE bytes
+    prp_list: Dma<[u64; 512]>, // per-request PRP list page; 8 B * 512 = 4096
     pub namespaces: HashMap<u32, NvmeNamespace>,
     pub stats: NvmeStats,
     q_id: u16,
@@ -273,14 +273,14 @@ unsafe impl Send for NvmeDevice {}
 
 unsafe impl Sync for NvmeDevice {}
 
-static BUFFER_SIZE: AtomicUsize = AtomicUsize::new(PAGESIZE_4KIB);
-
-// currently fixed
 const PRP_LIST_SIZE: usize = PAGESIZE_4KIB;
 
 const NVME_PAGE_SIZE: u64 = PAGESIZE_4KIB as u64;
 
 const PRP_LIST_ENTRIES: usize = PRP_LIST_SIZE / std::mem::size_of::<u64>();
+
+const BUFFER_SIZE: usize = PAGESIZE_2MIB;
+const _: () = assert!(BUFFER_SIZE / PAGESIZE_4KIB <= PRP_LIST_ENTRIES + 1);
 
 fn build_prp(addr: u64, bytes: u64, prp_list: Option<&mut Dma<[u64; 512]>>) -> (u64, u64) {
     let offset = addr & (NVME_PAGE_SIZE - 1);
@@ -320,7 +320,7 @@ impl NvmeDevice {
         // Map the device's BAR
         let (addr, len) = allocator.map_resource()?;
 
-        let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE.load(Ordering::Relaxed))?;
+        let buffer: Dma<u8> = allocator.allocate(BUFFER_SIZE)?;
         let prp_list: Dma<[u64; 512]> = allocator.allocate(PRP_LIST_SIZE)?;
 
         // CAP: bits 15:0 = MQES (max queue entries, 0-based), bits 35:32 = DSTRD.
@@ -510,10 +510,12 @@ impl NvmeDevice {
         })?;
 
         self.q_id += 1;
+        let block_size = self.namespaces.get(&1).map_or(512, |ns| ns.block_size);
         Ok(NvmeQueuePair {
             id: q_id,
             sub_queue,
             comp_queue,
+            block_size,
         })
     }
 
@@ -547,10 +549,12 @@ impl NvmeDevice {
             .collect::<Vec<u32>>()
     }
 
-    pub fn identify_namespace(&mut self, id: u32) -> NvmeNamespace {
+    /// # Errors
+    /// Returns an error if the namespace reports an unsupported LBA data size.
+    pub fn identify_namespace(&mut self, id: u32) -> Result<NvmeNamespace> {
         self.submit_and_complete_admin(|c_id, addr| {
             NvmeCommand::identify_namespace(c_id, addr, id)
-        });
+        })?;
 
         let namespace_data: IdentifyNamespaceData =
             unsafe { *(self.buffer.virt as *const IdentifyNamespaceData) };
@@ -562,11 +566,13 @@ impl NvmeDevice {
         // figure out block size
         let flba_idx = (namespace_data.flbas & 0xF) as usize;
         let flba_data = (namespace_data.lba_format_support[flba_idx] >> 16) & 0xFF;
-        let block_size = if (9..32).contains(&flba_data) {
-            1 << flba_data
-        } else {
-            0
-        };
+        if !(9..32).contains(&flba_data) {
+            return Err(format!(
+                "namespace {id} reports unsupported LBA data size (LBADS exponent {flba_data})"
+            )
+            .into());
+        }
+        let block_size = 1u64 << flba_data;
 
         // TODO: check metadata?
         println!("Namespace {id}, Size: {size}, Blocks: {blocks}, Block size: {block_size}");
@@ -577,14 +583,15 @@ impl NvmeDevice {
             block_size,
         };
         self.namespaces.insert(id, namespace);
-        namespace
+        Ok(namespace)
     }
 
     /// TODO: currently namespace 1 is hardcoded
     /// # Errors
     pub fn write(&mut self, data: &impl DmaSlice, mut lba: u64) -> Result<()> {
+        let block_size = self.namespaces.get(&1).map_or(512, |ns| ns.block_size);
         for chunk in data.chunks(2 * 4096) {
-            let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
+            let blocks = (chunk.slice.len() as u64).div_ceil(block_size);
             self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, true);
             lba += blocks;
         }
@@ -600,13 +607,14 @@ impl NvmeDevice {
         mut lba: u64,
         write: bool,
     ) -> Result<Duration> {
+        let block_size = self.namespaces.get(&1).map_or(512, |ns| ns.block_size);
         let mut total = Duration::ZERO;
         for chunk in data.chunks(128 * 4096) {
             let chunk_len = chunk.slice.len();
             let prp_pages = chunk_len / PAGESIZE_4KIB;
             // println!("received {} prp pages", prp_pages);
 
-            let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
+            let blocks = (chunk.slice.len() as u64).div_ceil(block_size);
             let start = Instant::now();
             self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, write);
             let elapsed = start.elapsed();
@@ -623,9 +631,9 @@ impl NvmeDevice {
     /// `NVMe` read to `DmaSlice`
     /// # Errors
     pub fn read(&mut self, dest: &impl DmaSlice, mut lba: u64) -> Result<()> {
-        // let ns = *self.namespaces.get(&1).unwrap();
+        let block_size = self.namespaces.get(&1).map_or(512, |ns| ns.block_size);
         for chunk in dest.chunks(2 * 4096) {
-            let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
+            let blocks = (chunk.slice.len() as u64).div_ceil(block_size);
             self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, false);
             lba += blocks;
         }
@@ -638,7 +646,7 @@ impl NvmeDevice {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in data.chunks(128 * 4096) {
             self.buffer[..chunk.len()].copy_from_slice(chunk);
-            let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
+            let blocks = (chunk.len() as u64).div_ceil(ns.block_size);
             self.namespace_io(1, blocks, lba, self.buffer.phys as u64, true);
             lba += blocks;
         }
@@ -651,7 +659,7 @@ impl NvmeDevice {
     pub fn read_copied(&mut self, dest: &mut [u8], mut lba: u64) -> Result<()> {
         let ns = *self.namespaces.get(&1).unwrap();
         for chunk in dest.chunks_mut(128 * 4096) {
-            let blocks = (chunk.len() as u64 + ns.block_size - 1) / ns.block_size;
+            let blocks = (chunk.len() as u64).div_ceil(ns.block_size);
             self.namespace_io(1, blocks, lba, self.buffer.phys as u64, false);
             lba += blocks;
             chunk.copy_from_slice(&self.buffer[..chunk.len()]);
@@ -727,7 +735,7 @@ impl NvmeDevice {
         batch_len: u64,
     ) -> Result<()> {
         let ns = *self.namespaces.get(&ns_id).unwrap();
-        let block_size = 512;
+        let block_size = ns.block_size;
         let q_id = 1;
 
         for chunk in data.chunks(PAGESIZE_2MIB) {
@@ -769,7 +777,7 @@ impl NvmeDevice {
         batch_len: u64,
     ) -> Result<()> {
         let ns = *self.namespaces.get(&ns_id).unwrap();
-        let block_size = 512;
+        let block_size = ns.block_size;
         let q_id = 1;
 
         for chunk in data.chunks_mut(PAGESIZE_2MIB) {
@@ -806,7 +814,8 @@ impl NvmeDevice {
 
         let q_id = 1;
 
-        let bytes = blocks * 512;
+        let block_size = self.namespaces.get(&ns_id).map_or(512, |ns| ns.block_size);
+        let bytes = blocks * block_size;
         let (ptr0, ptr1) = build_prp(addr, bytes, Some(&mut self.prp_list));
 
         let entry = if write {
