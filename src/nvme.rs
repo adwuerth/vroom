@@ -104,16 +104,11 @@ impl NvmeQueuePair {
     /// returns amount of requests pushed into submission queue
     pub fn submit_io(&mut self, data: &impl DmaSlice, mut lba: u64, write: bool) -> usize {
         let mut reqs = 0;
-        // TODO: contruct PRP list?
         for chunk in data.chunks(2 * 4096) {
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
             let addr = chunk.phys_addr as u64;
             let bytes = blocks * 512;
-            let ptr1 = if bytes <= 4096 {
-                0
-            } else {
-                addr + 4096 // self.page_size
-            };
+            let (ptr0, ptr1) = build_prp(addr, bytes, None);
 
             let entry = if write {
                 NvmeCommand::io_write(
@@ -121,7 +116,7 @@ impl NvmeQueuePair {
                     1,
                     lba,
                     blocks as u16 - 1,
-                    addr,
+                    ptr0,
                     ptr1,
                 )
             } else {
@@ -130,7 +125,7 @@ impl NvmeQueuePair {
                     1,
                     lba,
                     blocks as u16 - 1,
-                    addr,
+                    ptr0,
                     ptr1,
                 )
             };
@@ -283,6 +278,36 @@ static BUFFER_SIZE: AtomicUsize = AtomicUsize::new(PAGESIZE_4KIB);
 // currently fixed
 const PRP_LIST_SIZE: usize = PAGESIZE_4KIB;
 
+const NVME_PAGE_SIZE: u64 = PAGESIZE_4KIB as u64;
+
+const PRP_LIST_ENTRIES: usize = PRP_LIST_SIZE / std::mem::size_of::<u64>();
+
+fn build_prp(addr: u64, bytes: u64, prp_list: Option<&mut Dma<[u64; 512]>>) -> (u64, u64) {
+    let offset = addr & (NVME_PAGE_SIZE - 1);
+    let base = addr - offset;
+    let num_pages = (offset + bytes).div_ceil(NVME_PAGE_SIZE) as usize;
+
+    let prp2 = match num_pages {
+        0 | 1 => 0,
+        2 => base + NVME_PAGE_SIZE,
+        n => {
+            let list = prp_list.expect("transfer spans >2 pages but no PRP list was provided");
+            assert!(
+                n - 1 <= PRP_LIST_ENTRIES,
+                "transfer needs {} PRP list entries, only {PRP_LIST_ENTRIES} available",
+                n - 1
+            );
+            let phys = list.phys as u64;
+            for i in 1..n {
+                list[i - 1] = base + (i as u64) * NVME_PAGE_SIZE;
+            }
+            phys
+        }
+    };
+
+    (addr, prp2)
+}
+
 #[allow(unused)]
 impl NvmeDevice {
     /// Initialises `NVMe` device
@@ -323,10 +348,6 @@ impl NvmeDevice {
             q_id: 1,
             allocator,
         };
-
-        for i in 1..512 {
-            dev.prp_list[i - 1] = (dev.buffer.phys + i * 4096) as u64;
-        }
 
         let cap = dev.get_reg64(NvmeRegs64::CAP as u64);
         let maximum_queue_size = (cap & 0xFFFF) as u16 + 1;
@@ -585,10 +606,6 @@ impl NvmeDevice {
             let prp_pages = chunk_len / PAGESIZE_4KIB;
             // println!("received {} prp pages", prp_pages);
 
-            for i in 0..prp_pages {
-                self.prp_list[i] = (chunk.phys_addr + i * 4096) as u64;
-            }
-
             let blocks = (chunk.slice.len() as u64 + 512 - 1) / 512;
             let start = Instant::now();
             self.namespace_io(1, blocks, lba, chunk.phys_addr as u64, write);
@@ -655,15 +672,7 @@ impl NvmeDevice {
         let q_id = 1;
 
         let bytes = blocks * ns.block_size;
-        let ptr1 = if bytes <= 4096 {
-            0
-        } else if bytes <= 8192 {
-            addr + 4096 // self.page_size
-        } else {
-            // idk if this works
-            let offset = (addr - self.buffer.phys as u64) / 8;
-            self.prp_list.phys as u64 + offset
-        };
+        let (ptr0, ptr1) = build_prp(addr, bytes, Some(&mut self.prp_list));
 
         let entry = if write {
             NvmeCommand::io_write(
@@ -671,7 +680,7 @@ impl NvmeDevice {
                 ns.id,
                 lba,
                 blocks as u16 - 1,
-                addr,
+                ptr0,
                 ptr1,
             )
         } else {
@@ -680,7 +689,7 @@ impl NvmeDevice {
                 ns.id,
                 lba,
                 blocks as u16 - 1,
-                addr,
+                ptr0,
                 ptr1,
             )
         };
@@ -798,14 +807,7 @@ impl NvmeDevice {
         let q_id = 1;
 
         let bytes = blocks * 512;
-        let ptr1 = if bytes <= 4096 {
-            0
-        } else if bytes <= 8192 {
-            // self.buffer.phys as u64 + 4096 // self.page_size
-            addr + 4096 // self.page_size
-        } else {
-            self.prp_list.phys as u64 + 8
-        };
+        let (ptr0, ptr1) = build_prp(addr, bytes, Some(&mut self.prp_list));
 
         let entry = if write {
             NvmeCommand::io_write(
@@ -813,7 +815,7 @@ impl NvmeDevice {
                 ns_id,
                 lba,
                 blocks as u16 - 1,
-                addr,
+                ptr0,
                 ptr1,
             )
         } else {
@@ -822,7 +824,7 @@ impl NvmeDevice {
                 ns_id,
                 lba,
                 blocks as u16 - 1,
-                addr,
+                ptr0,
                 ptr1,
             )
         };
