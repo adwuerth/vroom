@@ -955,3 +955,32 @@ impl Mapping for NvmeDevice {
         self.allocator.map_resource()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{build_prp, NVME_PAGE_SIZE};
+
+    const PAGE: u64 = NVME_PAGE_SIZE;
+
+    #[test]
+    fn single_page_has_no_prp2() {
+        let addr = 4 * PAGE;
+        assert_eq!(build_prp(addr, 512, None), (addr, 0));
+        assert_eq!(build_prp(addr, PAGE, None), (addr, 0));
+    }
+
+    #[test]
+    fn two_pages_point_prp2_at_second_page() {
+        let addr = 4 * PAGE;
+        assert_eq!(build_prp(addr, PAGE + 1, None), (addr, addr + PAGE));
+        assert_eq!(build_prp(addr, 2 * PAGE, None), (addr, addr + PAGE));
+    }
+
+    #[test]
+    fn offset_address_rounds_page_count_up() {
+        let addr = 4 * PAGE + 100;
+        let base = 4 * PAGE;
+        assert_eq!(build_prp(addr, PAGE, None), (addr, base + PAGE));
+        assert_eq!(build_prp(addr, 8, None), (addr, 0));
+    }
+}
