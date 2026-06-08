@@ -110,13 +110,13 @@ fn qd_n_multithread_latency_nanos(
                 };
                 let before = Instant::now();
 
-                qpair.submit_io(
+                let submitted = qpair.submit_io(
                     &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                     lba * blocks,
                     write,
                 );
 
-                outstanding_ops += 1;
+                outstanding_ops += submitted;
 
                 if outstanding_ops == queue_depth {
                     while qpair.quick_poll().is_some() {
@@ -221,14 +221,14 @@ fn qd_n_multithread(
                     outstanding_ops -= 1;
                     total_io_ops += 1;
                 }
-                qpair.submit_io(
+                let submitted = qpair.submit_io(
                     &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
                     lba * blocks,
                     write,
                 );
                 latencies.lock().unwrap().push(before.elapsed().as_nanos());
                 total += before.elapsed();
-                outstanding_ops += 1;
+                outstanding_ops += submitted;
             }
 
             if outstanding_ops != 0 {

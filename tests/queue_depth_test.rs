@@ -82,13 +82,13 @@ fn qd_n(
             }
             outstanding_ops -= 1;
         }
-        qpair.submit_io(
+        let submitted = qpair.submit_io(
             &buffer.slice((outstanding_ops * bytes)..(outstanding_ops + 1) * bytes),
             lba * blocks,
             write,
         );
         total += before.elapsed();
-        outstanding_ops += 1;
+        outstanding_ops += submitted;
     }
 
     if outstanding_ops != 0 {

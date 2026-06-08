@@ -124,14 +124,17 @@ impl CompletionQueue {
     }
 
     pub fn complete_n(&mut self, commands: usize) -> (usize, NvmeCompletion, usize) {
+        assert!(commands > 0);
         let prev = self.head;
-        self.head += commands - 1;
-        if self.head >= self.len {
-            self.phase = !self.phase;
-        }
-        self.head %= self.len;
 
-        let (head, entry, _) = self.complete_spin();
+        let (mut head, mut entry, _) = self.complete_spin();
+        for _ in 1..commands {
+            let (h, e, _) = self.complete_spin();
+            head = h;
+            if (entry.status >> 1) == 0 {
+                entry = e;
+            }
+        }
         (head, entry, prev)
     }
 

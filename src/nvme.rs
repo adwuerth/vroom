@@ -746,6 +746,8 @@ impl NvmeDevice {
             let batch_size = chunk.len() as u64 / batch_len;
             let blocks = batch_size / ns.block_size;
 
+            let mut submitted = 0;
+            let mut full = false;
             for i in 0..batch_len {
                 if let Some(tail) = self.submit_io(
                     &ns,
@@ -756,12 +758,19 @@ impl NvmeDevice {
                 ) {
                     self.stats.submissions += 1;
                     self.write_reg_idx(NvmeArrayRegs::SQyTDBL, q_id as u16, tail as u32);
+                    submitted += 1;
+                    lba += blocks;
                 } else {
-                    eprintln!("tail: {tail}, batch_len: {batch_len}, batch_size: {batch_size}, blocks: {blocks}");
+                    full = true;
+                    break;
                 }
-                lba += blocks;
             }
-            self.io_sq.head = self.complete_io(batch_len).unwrap() as usize;
+            if submitted > 0 {
+                self.io_sq.head = self.complete_io(submitted).unwrap() as usize;
+            }
+            if full {
+                return Err("batched_write: submission queue full".into());
+            }
         }
 
         Ok(())
@@ -787,6 +796,8 @@ impl NvmeDevice {
             let batch_size = chunk.len() as u64 / batch_len;
             let blocks = batch_size / ns.block_size;
 
+            let mut submitted = 0;
+            let mut full = false;
             for i in 0..batch_len {
                 if let Some(tail) = self.submit_io(
                     &ns,
@@ -797,12 +808,19 @@ impl NvmeDevice {
                 ) {
                     self.stats.submissions += 1;
                     self.write_reg_idx(NvmeArrayRegs::SQyTDBL, q_id as u16, tail as u32);
+                    submitted += 1;
+                    lba += blocks;
                 } else {
-                    eprintln!("tail: {tail}, batch_len: {batch_len}, batch_size: {batch_size}, blocks: {blocks}");
+                    full = true;
+                    break;
                 }
-                lba += blocks;
             }
-            self.io_sq.head = self.complete_io(batch_len).unwrap() as usize;
+            if submitted > 0 {
+                self.io_sq.head = self.complete_io(submitted).unwrap() as usize;
+            }
+            if full {
+                return Err("batched_read: submission queue full".into());
+            }
             chunk.copy_from_slice(&self.buffer[..chunk.len()]);
         }
         Ok(())
